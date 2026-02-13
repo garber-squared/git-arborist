@@ -1,5 +1,9 @@
 # Makefile for my-sideby-ai development
 
+# Load GH_TOKEN from .env for GitHub CLI targets
+include .env
+
+
 # Environment configuration
 # ENV_FILE = .env.development.local
 
@@ -497,3 +501,29 @@ help:
 	@echo "  make rebase-staging  						- Rebase all local branches onto staging"
 	@echo "  make worktree  									- Create a git worktree for the current branch in ../current-branch-name"
 	@echo "  make wl  												- List current git worktrees"
+
+# =============================================================================
+# GitHub CLI Commands
+# =============================================================================
+# Usage:
+#   make issue list
+#   make issue view 1
+#   make issue create --title "Bug" --body "Details"
+#   make pr list
+#   make pr create --base staging
+#   make pr view 42
+# =============================================================================
+
+# Capture extra arguments when "issue" or "pr" is the target
+ifneq (,$(filter issue pr,$(firstword $(MAKECMDGOALS))))
+  GH_ARGS := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
+  $(eval $(GH_ARGS):;@:)
+endif
+
+.PHONY: issue pr
+
+issue:
+	GH_TOKEN=$(GH_TOKEN) gh issue $(GH_ARGS)
+
+pr:
+	GH_TOKEN=$(GH_TOKEN) gh pr $(GH_ARGS)
