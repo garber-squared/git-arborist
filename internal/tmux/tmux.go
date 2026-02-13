@@ -11,6 +11,34 @@ func JumpToWindow(session string, window int) error {
 	return exec.Command("tmux", "select-window", "-t", target).Run()
 }
 
+// KillWindow kills a tmux window by session and window index.
+func KillWindow(session string, window int) error {
+	target := fmt.Sprintf("%s:%d", session, window)
+	return exec.Command("tmux", "kill-window", "-t", target).Run()
+}
+
+// KillWindowByPath finds a tmux window whose pane current path matches
+// the given directory and kills it.
+func KillWindowByPath(path string) error {
+	cmd := exec.Command("tmux", "list-windows", "-a", "-F", "#{session_name}:#{window_index} #{pane_current_path}")
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("tmux list-windows: %w", err)
+	}
+
+	for _, line := range splitLines(string(out)) {
+		if len(line) == 0 {
+			continue
+		}
+		var target, panePath string
+		n, _ := fmt.Sscanf(line, "%s %s", &target, &panePath)
+		if n == 2 && panePath == path {
+			return exec.Command("tmux", "kill-window", "-t", target).Run()
+		}
+	}
+	return fmt.Errorf("no tmux window found for path %s", path)
+}
+
 // FindWindowByPath searches tmux windows for one whose pane current path
 // matches the given directory and switches to it.
 func FindWindowByPath(path string) error {

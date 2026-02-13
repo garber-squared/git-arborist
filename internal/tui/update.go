@@ -44,6 +44,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle confirmation state first
+	if m.confirming {
+		if msg.String() == "d" {
+			m.confirming = false
+			if m.cursor < len(m.rows) {
+				row := m.rows[m.cursor]
+				// Kill tmux window
+				if row.AgentState != nil && row.AgentState.TMUX.Session != "" {
+					_ = tmux.KillWindow(row.AgentState.TMUX.Session, row.AgentState.TMUX.Window)
+				} else {
+					_ = tmux.KillWindowByPath(row.Worktree.Path)
+				}
+				// Remove worktree
+				if err := worktree.Remove(row.Worktree.Path); err != nil {
+					m.message = fmt.Sprintf("delete failed: %v", err)
+					return m, nil
+				}
+				m.message = fmt.Sprintf("Deleted worktree '%s'", row.Worktree.Branch)
+				m.refreshAll()
+			}
+		} else {
+			m.confirming = false
+			m.message = ""
+		}
+		return m, nil
+	}
+
 	switch {
 	case msg.String() == "q" || msg.String() == "ctrl+c":
 		if m.watcher != nil {
@@ -100,6 +127,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if err == nil {
 				m.message = string(out)
 			}
+		}
+
+	case msg.String() == "d":
+		if m.cursor == 0 {
+			m.message = "Cannot delete the main worktree"
+		} else if m.cursor < len(m.rows) {
+			m.confirming = true
+			m.message = fmt.Sprintf("Delete worktree '%s'? Press d to confirm, any other key to cancel", m.rows[m.cursor].Worktree.Branch)
 		}
 	}
 	return m, nil
