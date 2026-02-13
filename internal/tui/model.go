@@ -25,9 +25,10 @@ type Model struct {
 	repoRoot string
 	watcher  *watcher.Watcher
 	sendFn   func(tea.Msg)
-	width    int
-	height   int
-	message  string
+	width      int
+	height     int
+	message    string
+	confirming bool
 }
 
 // NewModel creates a new dashboard model.

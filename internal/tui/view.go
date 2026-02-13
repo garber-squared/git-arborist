@@ -7,7 +7,6 @@ import (
 
 const (
 	colBranch = 20
-	colAgent  = 16
 	colPR     = 50
 	colGit    = 14
 )
@@ -19,15 +18,13 @@ func (m *Model) View() string {
 	b.WriteString("\n  Worktree Dashboard (repo-local)\n\n")
 
 	// Header
-	b.WriteString(fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s\n",
+	b.WriteString(fmt.Sprintf("  %-*s  %-*s  %-*s\n",
 		colBranch, "Branch",
-		colAgent, "Agent",
 		colPR, "PR",
 		colGit, "Git Status",
 	))
-	b.WriteString(fmt.Sprintf("  %s  %s  %s  %s\n",
+	b.WriteString(fmt.Sprintf("  %s  %s  %s\n",
 		strings.Repeat("─", colBranch),
-		strings.Repeat("─", colAgent),
 		strings.Repeat("─", colPR),
 		strings.Repeat("─", colGit),
 	))
@@ -40,11 +37,6 @@ func (m *Model) View() string {
 		}
 
 		branch := truncate(row.Worktree.Branch, colBranch)
-		agentStr := "—"
-		if row.AgentState != nil {
-			agentStr = row.AgentState.Status
-		}
-		agentStr = truncate(agentStr, colAgent)
 
 		prStr := "—"
 		if row.PR != nil {
@@ -54,10 +46,9 @@ func (m *Model) View() string {
 
 		gitStr := truncate(row.GitStatus.String(), colGit)
 
-		b.WriteString(fmt.Sprintf("%s%-*s  %-*s  %-*s  %-*s\n",
+		b.WriteString(fmt.Sprintf("%s%-*s  %-*s  %-*s\n",
 			cursor,
 			colBranch, branch,
-			colAgent, agentStr,
 			colPR, prStr,
 			colGit, gitStr,
 		))
@@ -74,7 +65,7 @@ func (m *Model) View() string {
 	}
 
 	// Help
-	b.WriteString("\n  j/k: navigate  enter: tmux jump  o: open PR  g: git status  r: refresh  q: quit\n")
+	b.WriteString("\n  j/k: navigate  enter: tmux jump  o: open PR  g: git status  d: delete  r: refresh  q: quit\n")
 
 	return b.String()
 }

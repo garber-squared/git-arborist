@@ -21,6 +21,11 @@ func Discover(repoRoot string) ([]Worktree, error) {
 	return parsePorcelain(string(out)), nil
 }
 
+// Remove removes a worktree at the given path using git worktree remove.
+func Remove(path string) error {
+	return exec.Command("git", "worktree", "remove", path).Run()
+}
+
 func parsePorcelain(raw string) []Worktree {
 	var worktrees []Worktree
 	var current Worktree
