@@ -8,8 +8,8 @@ import (
 const (
 	colBranch = 20
 	colAgent  = 16
-	colPR     = 40
-	colGit    = 24
+	colPR     = 50
+	colGit    = 14
 )
 
 // View renders the dashboard.
