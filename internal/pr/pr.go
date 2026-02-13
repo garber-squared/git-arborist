@@ -15,11 +15,10 @@ type PullRequest struct {
 
 // String returns a compact display string.
 func (p PullRequest) String() string {
-	label := fmt.Sprintf("#%d (%s)", p.Number, p.State)
 	if p.IsDraft {
-		label = fmt.Sprintf("#%d (draft)", p.Number)
+		return fmt.Sprintf("#%d (draft) %s", p.Number, p.Title)
 	}
-	return label
+	return fmt.Sprintf("#%d %s", p.Number, p.Title)
 }
 
 // Fetch retrieves the PR associated with the branch checked out in worktreePath.
