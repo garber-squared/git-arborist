@@ -8,7 +8,7 @@ import (
 const (
 	colBranch = 20
 	colAgent  = 16
-	colPR     = 18
+	colPR     = 40
 	colGit    = 24
 )
 
