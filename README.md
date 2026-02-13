@@ -11,17 +11,16 @@ git-arborist gives you a single view of all your Git worktrees and their statuse
 ```
   Worktree Dashboard (my-repo)
 
-  Branch                Agent            PR                Git Status
-  ────────────────────────────────────────────────────────────────────────
-  ▸ feature/auth        awaiting_input   #123 (open)       clean ↑1
-    fix/parsing         running          —                 dirty
-    exp/refactor        idle             #130 (draft)      clean
+  Branch                PR                                                  Git Status
+  ────────────────────  ──────────────────────────────────────────────────  ──────────────
+  ▸ feature/auth        #123 Add OAuth login (open)                         clean ↑1
+    fix/parsing         —                                                   dirty
+    exp/refactor        #130 Refactor parser module (draft)                 clean
 ```
 
 Each row shows:
 - **Branch** name
-- **Agent** state (starting, running, awaiting_input, idle, error, stopped)
-- **PR** number and status from GitHub
+- **PR** number, title, and status from GitHub
 - **Git status** (clean/dirty, ahead/behind upstream)
 
 Updates are event-driven via filesystem watching — no polling.
@@ -36,7 +35,7 @@ Updates are event-driven via filesystem watching — no polling.
 ## Install
 
 ```bash
-git clone https://github.com/your-user/git-arborist.git
+git clone https://github.com/garber-squared/git-arborist.git
 cd git-arborist
 make go-build
 ```
@@ -66,6 +65,7 @@ make dashboard
 | `Enter` | Jump to worktree's tmux window |
 | `o` | Open PR in browser |
 | `g` | Show detailed git status |
+| `d` | Delete worktree (with confirmation) |
 | `r` | Refresh all data |
 | `q` / `Ctrl+C` | Quit |
 
