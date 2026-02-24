@@ -10,25 +10,35 @@ import (
 	"github.com/garber-squared/git-arborist/internal/worktree"
 )
 
-// Row represents a single worktree row in the dashboard.
+// Row represents a single worktree tile in the dashboard.
 type Row struct {
-	Worktree   worktree.Worktree
-	GitStatus  gitstatus.Status
-	PR         *pr.PullRequest
-	AgentState *agent.State
+	Worktree      worktree.Worktree
+	GitStatus     gitstatus.Status
+	PR            *pr.PullRequest
+	AgentState    *agent.State
+	ActiveAgent   string
+	AgentActivity agent.Activity
+	PaneTarget    string // tmux target like "session:1.0"
+	PaneContent   string // captured pane text
 }
 
 // Model is the Bubble Tea model for the dashboard.
 type Model struct {
 	rows     []Row
-	cursor   int
+	cursorIdx int
 	repoRoot string
 	watcher  *watcher.Watcher
 	sendFn   func(tea.Msg)
-	width      int
-	height     int
-	message    string
+	width    int
+	height   int
+	message  string
 	confirming bool
+
+	// Layout
+	visibleCols int // tiles visible at once: min(len(rows), 3)
+	tileW       int
+	tileH       int
+	scrollCol   int // index of leftmost visible tile
 }
 
 // NewModel creates a new dashboard model.
