@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os/exec"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -17,9 +18,21 @@ import (
 // refreshMsg triggers a full data refresh.
 type refreshMsg struct{}
 
+// agentTickMsg triggers a periodic agent detection refresh.
+type agentTickMsg struct{}
+
+func agentTickCmd() tea.Cmd {
+	return tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+		return agentTickMsg{}
+	})
+}
+
 // Init initializes the model.
 func (m *Model) Init() tea.Cmd {
-	return func() tea.Msg { return refreshMsg{} }
+	return tea.Batch(
+		func() tea.Msg { return refreshMsg{} },
+		agentTickCmd(),
+	)
 }
 
 // Update handles messages.
@@ -35,6 +48,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case refreshMsg:
 		m.refreshAll()
+
+	case agentTickMsg:
+		m.refreshAgents()
+		return m, agentTickCmd()
 
 	case watcher.FileChangedMsg:
 		m.refreshRow(msg.WorktreePath, msg.Kind)
@@ -161,6 +178,8 @@ func (m *Model) refreshAll() {
 		m.cursor = max(0, len(m.rows)-1)
 	}
 
+	m.refreshAgents()
+
 	// Set up file watchers
 	if m.watcher != nil {
 		m.watcher.Close()
@@ -172,6 +191,22 @@ func (m *Model) refreshAll() {
 			for _, row := range m.rows {
 				w.WatchWorktree(row.Worktree.Path)
 			}
+		}
+	}
+}
+
+func (m *Model) refreshAgents() {
+	detected := agent.DetectAll()
+	for i, row := range m.rows {
+		if info, ok := detected[row.Worktree.Path]; ok {
+			m.rows[i].ActiveAgent = info.Name
+			m.rows[i].AgentActivity = info.Activity
+		} else if row.AgentState != nil && row.AgentState.Agent != "" {
+			m.rows[i].ActiveAgent = row.AgentState.Agent
+			m.rows[i].AgentActivity = agent.ActivityIdle
+		} else {
+			m.rows[i].ActiveAgent = ""
+			m.rows[i].AgentActivity = agent.ActivityIdle
 		}
 	}
 }
