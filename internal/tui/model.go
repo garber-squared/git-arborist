@@ -12,10 +12,12 @@ import (
 
 // Row represents a single worktree row in the dashboard.
 type Row struct {
-	Worktree   worktree.Worktree
-	GitStatus  gitstatus.Status
-	PR         *pr.PullRequest
-	AgentState *agent.State
+	Worktree    worktree.Worktree
+	GitStatus   gitstatus.Status
+	PR          *pr.PullRequest
+	AgentState  *agent.State
+	ActiveAgent    string
+	AgentActivity  agent.Activity
 }
 
 // Model is the Bubble Tea model for the dashboard.
