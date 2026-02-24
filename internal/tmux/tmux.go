@@ -3,12 +3,24 @@ package tmux
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 )
 
 // JumpToWindow switches tmux focus to the given session and window.
 func JumpToWindow(session string, window int) error {
 	target := fmt.Sprintf("%s:%d", session, window)
 	return exec.Command("tmux", "select-window", "-t", target).Run()
+}
+
+// JumpToPane switches tmux focus to the window containing the given pane target
+// (e.g. "session:3.0" → selects window "session:3").
+func JumpToPane(paneTarget string) error {
+	// Strip ".pane" suffix to get "session:window"
+	windowTarget := paneTarget
+	if idx := strings.LastIndex(paneTarget, "."); idx != -1 {
+		windowTarget = paneTarget[:idx]
+	}
+	return exec.Command("tmux", "select-window", "-t", windowTarget).Run()
 }
 
 // KillWindow kills a tmux window by session and window index.
@@ -61,6 +73,68 @@ func FindWindowByPath(path string) error {
 		}
 	}
 	return fmt.Errorf("no tmux window found for path %s", path)
+}
+
+// PaneTarget represents a tmux pane and the directory it's in.
+type PaneTarget struct {
+	Target string // e.g. "session:1.0"
+	Path   string
+}
+
+// CurrentPane returns the target of the tmux pane running this process.
+func CurrentPane() string {
+	cmd := exec.Command("tmux", "display-message", "-p", "#{session_name}:#{window_index}.#{pane_index}")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// ListPanes returns all tmux panes with their targets and current paths,
+// excluding the pane that is running this process (to avoid recursive capture).
+func ListPanes() ([]PaneTarget, error) {
+	self := CurrentPane()
+
+	cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_path}")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("tmux list-panes: %w", err)
+	}
+
+	var panes []PaneTarget
+	for _, line := range splitLines(string(out)) {
+		if line == "" {
+			continue
+		}
+		parts := splitTab(line)
+		if len(parts) == 2 {
+			if parts[0] == self {
+				continue
+			}
+			panes = append(panes, PaneTarget{Target: parts[0], Path: parts[1]})
+		}
+	}
+	return panes, nil
+}
+
+// CapturePaneContent grabs the visible text from a tmux pane.
+func CapturePaneContent(target string) string {
+	cmd := exec.Command("tmux", "capture-pane", "-p", "-t", target)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
+}
+
+func splitTab(s string) []string {
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\t' {
+			return []string{s[:i], s[i+1:]}
+		}
+	}
+	return []string{s}
 }
 
 func splitLines(s string) []string {
