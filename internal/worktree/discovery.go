@@ -21,9 +21,19 @@ func Discover(repoRoot string) ([]Worktree, error) {
 	return parsePorcelain(string(out)), nil
 }
 
+// Prune removes stale worktree entries whose working directories no longer exist.
+func Prune(repoRoot string) {
+	_ = exec.Command("git", "-C", repoRoot, "worktree", "prune").Run()
+}
+
 // Remove removes a worktree at the given path using git worktree remove.
 func Remove(path string) error {
 	return exec.Command("git", "worktree", "remove", path).Run()
+}
+
+// ForceRemove removes a worktree even if it has uncommitted changes.
+func ForceRemove(path string) error {
+	return exec.Command("git", "worktree", "remove", "--force", path).Run()
 }
 
 func parsePorcelain(raw string) []Worktree {

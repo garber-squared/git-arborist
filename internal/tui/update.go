@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os/exec"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -174,20 +175,43 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) refreshAll() {
+	worktree.Prune(m.repoRoot)
 	worktrees, err := worktree.Discover(m.repoRoot)
 	if err != nil {
 		m.message = fmt.Sprintf("discovery error: %v", err)
 		return
 	}
 
-	rows := make([]Row, len(worktrees))
+	// Fetch all worktree data in parallel
+	allRows := make([]Row, len(worktrees))
+	var wg sync.WaitGroup
 	for i, wt := range worktrees {
-		rows[i] = Row{
-			Worktree:  wt,
-			GitStatus: gitstatus.Get(wt.Path),
-			PR:        pr.Fetch(wt.Path),
-			AgentState: agent.ReadState(wt.Path),
+		wg.Add(1)
+		go func(i int, wt worktree.Worktree) {
+			defer wg.Done()
+			allRows[i] = Row{
+				Worktree:   wt,
+				GitStatus:  gitstatus.Get(wt.Path),
+				PR:         pr.Fetch(wt.Path),
+				AgentState: agent.ReadState(wt.Path),
+			}
+		}(i, wt)
+	}
+	wg.Wait()
+
+	// Filter out stale worktrees (merged PR, skip main worktree)
+	var rows []Row
+	for i, row := range allRows {
+		if i > 0 && row.PR != nil && row.PR.State == "MERGED" {
+			if row.AgentState != nil && row.AgentState.TMUX.Session != "" {
+				_ = tmux.KillWindow(row.AgentState.TMUX.Session, row.AgentState.TMUX.Window)
+			} else {
+				_ = tmux.KillWindowByPath(row.Worktree.Path)
+			}
+			_ = worktree.ForceRemove(row.Worktree.Path)
+			continue
 		}
+		rows = append(rows, row)
 	}
 	m.rows = rows
 	if m.cursorIdx >= len(m.rows) {
