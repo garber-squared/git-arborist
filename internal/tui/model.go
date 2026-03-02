@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"path/filepath"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/garber-squared/git-arborist/internal/agent"
@@ -39,12 +41,17 @@ type Model struct {
 	tileW       int
 	tileH       int
 	scrollCol   int // index of leftmost visible tile
+
+	// Persist cursor across sessions
+	stateFile string
+	restored  bool
 }
 
 // NewModel creates a new dashboard model.
 func NewModel(repoRoot string) Model {
 	return Model{
-		repoRoot: repoRoot,
+		repoRoot:  repoRoot,
+		stateFile: filepath.Join(repoRoot, ".git", "arborist-state"),
 	}
 }
 

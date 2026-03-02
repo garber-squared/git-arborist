@@ -118,6 +118,12 @@ func ListPanes() ([]PaneTarget, error) {
 	return panes, nil
 }
 
+// SendKeys sends keys to a tmux pane.
+func SendKeys(target string, keys ...string) error {
+	args := append([]string{"send-keys", "-t", target}, keys...)
+	return exec.Command("tmux", args...).Run()
+}
+
 // CapturePaneContent grabs the visible text from a tmux pane.
 func CapturePaneContent(target string) string {
 	cmd := exec.Command("tmux", "capture-pane", "-p", "-t", target)

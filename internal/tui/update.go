@@ -2,7 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -105,6 +107,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case msg.String() == "q" || msg.String() == "ctrl+c":
+		if m.cursorIdx < len(m.rows) {
+			_ = os.WriteFile(m.stateFile, []byte(m.rows[m.cursorIdx].Worktree.Path), 0644)
+		}
 		if m.watcher != nil {
 			m.watcher.Close()
 		}
@@ -126,6 +131,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.message = "Refreshing..."
 		m.refreshAll()
 		m.message = ""
+
+	case msg.String() == "shift+enter":
+		if m.cursorIdx < len(m.rows) {
+			row := m.rows[m.cursorIdx]
+			if row.PaneTarget != "" {
+				if err := tmux.SendKeys(row.PaneTarget, "Enter"); err != nil {
+					m.message = fmt.Sprintf("send-keys failed: %v", err)
+				} else {
+					m.message = fmt.Sprintf("Sent Enter to %s", row.Worktree.Branch)
+				}
+			} else {
+				m.message = "No tmux pane found for this worktree"
+			}
+		}
 
 	case msg.String() == "enter":
 		if m.cursorIdx < len(m.rows) {
@@ -216,6 +235,20 @@ func (m *Model) refreshAll() {
 	m.rows = rows
 	if m.cursorIdx >= len(m.rows) {
 		m.cursorIdx = max(0, len(m.rows)-1)
+	}
+
+	if !m.restored {
+		m.restored = true
+		if data, err := os.ReadFile(m.stateFile); err == nil {
+			saved := strings.TrimSpace(string(data))
+			for i, row := range m.rows {
+				if row.Worktree.Path == saved {
+					m.cursorIdx = i
+					m.ensureCursorVisible()
+					break
+				}
+			}
+		}
 	}
 
 	m.refreshAgents()
