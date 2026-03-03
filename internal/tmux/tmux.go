@@ -126,7 +126,7 @@ func SendKeys(target string, keys ...string) error {
 
 // CapturePaneContent grabs the visible text from a tmux pane.
 func CapturePaneContent(target string) string {
-	cmd := exec.Command("tmux", "capture-pane", "-p", "-t", target)
+	cmd := exec.Command("tmux", "capture-pane", "-p", "-e", "-t", target)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
