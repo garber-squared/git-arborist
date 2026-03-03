@@ -132,7 +132,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refreshAll()
 		m.message = ""
 
-	case msg.String() == "shift+enter":
+	case msg.String() == "s":
 		if m.cursorIdx < len(m.rows) {
 			row := m.rows[m.cursorIdx]
 			if row.PaneTarget != "" {
@@ -183,9 +183,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case msg.String() == "d":
-		if m.cursorIdx == 0 {
-			m.message = "Cannot delete the main worktree"
-		} else if m.cursorIdx < len(m.rows) {
+		if m.cursorIdx < len(m.rows) {
 			m.confirming = true
 			m.message = fmt.Sprintf("Delete worktree '%s'? Press d to confirm, any other key to cancel", m.rows[m.cursorIdx].Worktree.Branch)
 		}
@@ -218,10 +216,13 @@ func (m *Model) refreshAll() {
 	}
 	wg.Wait()
 
-	// Filter out stale worktrees (merged PR, skip main worktree)
+	// Skip main worktree (index 0), filter out stale worktrees (merged PR)
 	var rows []Row
 	for i, row := range allRows {
-		if i > 0 && row.PR != nil && row.PR.State == "MERGED" {
+		if i == 0 {
+			continue // skip main worktree (repo root)
+		}
+		if row.PR != nil && row.PR.State == "MERGED" {
 			if row.AgentState != nil && row.AgentState.TMUX.Session != "" {
 				_ = tmux.KillWindow(row.AgentState.TMUX.Session, row.AgentState.TMUX.Window)
 			} else {

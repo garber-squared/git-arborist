@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/garber-squared/git-arborist/internal/agent"
 )
@@ -35,7 +36,7 @@ func (m *Model) View() string {
 	b.WriteString("\n  Worktree Dashboard\n")
 
 	if len(m.rows) == 0 {
-		b.WriteString("\n  No worktrees found.\n")
+		b.WriteString("\n  No worktrees.\n")
 		b.WriteString("\n  r: refresh  q: quit\n")
 		return b.String()
 	}
@@ -222,14 +223,13 @@ func cropPaneContent(content string, width, maxLines int) string {
 }
 
 func truncateToWidth(s string, maxW int) string {
-	if maxW <= 3 {
-		return s[:maxW]
-	}
-	runes := []rune(s)
-	if len(runes) <= maxW {
+	if lipgloss.Width(s) <= maxW {
 		return s
 	}
-	return string(runes[:maxW-1]) + "…"
+	if maxW <= 3 {
+		return ansi.Truncate(s, maxW, "")
+	}
+	return ansi.Truncate(s, maxW-1, "…")
 }
 
 func styleAgent(display, name string, activity agent.Activity) string {
