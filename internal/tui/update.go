@@ -105,6 +105,23 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Handle expanded overlay state
+	if m.expanded {
+		switch msg.String() {
+		case "up", "esc":
+			m.expanded = false
+			return m, nil
+		case "h", "l", "left", "right", "d", "r", "g", "s":
+			return m, nil
+		case "q", "ctrl+c":
+			m.expanded = false
+			// fall through to normal handling
+		case "enter", "o":
+			m.expanded = false
+			// fall through to normal handling
+		}
+	}
+
 	switch {
 	case msg.String() == "q" || msg.String() == "ctrl+c":
 		if m.cursorIdx < len(m.rows) {
@@ -126,6 +143,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursorIdx++
 		}
 		m.ensureCursorVisible()
+
+	case msg.String() == "up":
+		m.expanded = true
 
 	case msg.String() == "r":
 		m.message = "Refreshing..."

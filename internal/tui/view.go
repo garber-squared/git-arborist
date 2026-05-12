@@ -23,14 +23,22 @@ var (
 	styleIdle    = lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow
 	styleDim     = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // dim gray
 
-	borderSelected   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("4")) // blue
-	borderUnselected = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8")) // dim gray
+	borderSelected   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("4")).Background(lipgloss.Color("#2b2a1a")) // blue border + gentle yellow bg
+	borderUnselected = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8"))                                    // dim gray
+	borderExpanded   = lipgloss.NewStyle().Border(lipgloss.DoubleBorder()).BorderForeground(lipgloss.Color("4")).Background(lipgloss.Color("#2b2a1a"))
 )
 
 // View renders the tiled dashboard.
 func (m *Model) View() string {
 	m.computeLayout()
 
+	if m.expanded && m.cursorIdx < len(m.rows) {
+		return m.renderExpandedView()
+	}
+	return m.renderNormalView()
+}
+
+func (m *Model) renderNormalView() string {
 	var b strings.Builder
 
 	b.WriteString("\n  Worktree Dashboard\n")
@@ -79,9 +87,31 @@ func (m *Model) View() string {
 	}
 
 	// Help
-	b.WriteString("\n  h/l: navigate  enter: tmux jump  o: open PR  g: git status  d: delete  r: refresh  q: quit\n")
+	b.WriteString("\n  h/l: navigate  up: expand  enter: tmux jump  o: open PR  g: git status  d: delete  r: refresh  q: quit\n")
 
 	return b.String()
+}
+
+func (m *Model) renderExpandedView() string {
+	row := m.rows[m.cursorIdx]
+
+	// 80% of terminal width, full available height
+	expW := m.width * 80 / 100
+	if expW < 40 {
+		expW = 40
+	}
+	expH := m.height - dashHeaderH - dashFooterH
+	if expH < minTileBodyH+5 {
+		expH = minTileBodyH + 5
+	}
+
+	tile := m.renderTileAt(row, expW, expH, borderExpanded)
+
+	// Help line below the tile
+	help := "  esc/up: close  enter: tmux jump  o: open PR  q: quit"
+
+	content := tile + "\n" + help
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
 func (m *Model) computeLayout() {
@@ -128,8 +158,18 @@ func (m *Model) ensureCursorVisible() {
 }
 
 func (m *Model) renderTile(row Row, selected bool) string {
+	var style lipgloss.Style
+	if selected {
+		style = borderSelected
+	} else {
+		style = borderUnselected
+	}
+	return m.renderTileAt(row, m.tileW, m.tileH, style)
+}
+
+func (m *Model) renderTileAt(row Row, tileW, tileH int, style lipgloss.Style) string {
 	// Inner width = tile width - border (2 chars: 1 left + 1 right)
-	innerW := m.tileW - 4
+	innerW := tileW - 4
 	if innerW < 10 {
 		innerW = 10
 	}
@@ -155,7 +195,7 @@ func (m *Model) renderTile(row Row, selected bool) string {
 
 	// Body: pane content or placeholder
 	// border top/bottom = 2, header = 1, info = 1, separator = 1
-	bodyH := m.tileH - 2 - 3
+	bodyH := tileH - 2 - 3
 	if bodyH < minTileBodyH {
 		bodyH = minTileBodyH
 	}
@@ -183,13 +223,7 @@ func (m *Model) renderTile(row Row, selected bool) string {
 
 	content := strings.Join([]string{header, infoLine, sep, body}, "\n")
 
-	var style lipgloss.Style
-	if selected {
-		style = borderSelected
-	} else {
-		style = borderUnselected
-	}
-	style = style.Width(innerW).Height(m.tileH - 2)
+	style = style.Width(innerW).Height(tileH - 2)
 
 	return style.Render(content)
 }
