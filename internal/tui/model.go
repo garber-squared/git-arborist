@@ -35,6 +35,7 @@ type Model struct {
 	height   int
 	message  string
 	confirming bool
+	expanded   bool
 
 	// Layout
 	visibleCols int // tiles visible at once: min(len(rows), 3)
