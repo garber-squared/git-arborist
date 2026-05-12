@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/garber-squared/git-arborist/internal/agent"
+	"github.com/garber-squared/git-arborist/internal/docker"
 	"github.com/garber-squared/git-arborist/internal/gitstatus"
 	"github.com/garber-squared/git-arborist/internal/pr"
 	"github.com/garber-squared/git-arborist/internal/tmux"
@@ -90,6 +91,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				} else {
 					_ = tmux.KillWindowByPath(row.Worktree.Path)
 				}
+				// Stop and delete any docker compose containers tied to this worktree
+				_ = docker.RemoveContainersForWorktree(row.Worktree.Path)
 				// Remove worktree
 				if err := worktree.Remove(row.Worktree.Path); err != nil {
 					m.message = fmt.Sprintf("delete failed: %v", err)
@@ -248,6 +251,7 @@ func (m *Model) refreshAll() {
 			} else {
 				_ = tmux.KillWindowByPath(row.Worktree.Path)
 			}
+			_ = docker.RemoveContainersForWorktree(row.Worktree.Path)
 			_ = worktree.ForceRemove(row.Worktree.Path)
 			continue
 		}
