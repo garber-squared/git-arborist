@@ -8,6 +8,7 @@ import (
 	"github.com/garber-squared/git-arborist/internal/agent"
 	"github.com/garber-squared/git-arborist/internal/gitstatus"
 	"github.com/garber-squared/git-arborist/internal/pr"
+	"github.com/garber-squared/git-arborist/internal/register"
 	"github.com/garber-squared/git-arborist/internal/watcher"
 	"github.com/garber-squared/git-arborist/internal/worktree"
 )
@@ -46,6 +47,10 @@ type Model struct {
 	// Persist cursor across sessions
 	stateFile string
 	restored  bool
+
+	// Tracks open + recently-closed worktrees so the empty state can
+	// distinguish "nothing yet" from "you just closed your last one".
+	register *register.Register
 }
 
 // NewModel creates a new dashboard model.
@@ -53,6 +58,7 @@ func NewModel(repoRoot string) Model {
 	return Model{
 		repoRoot:  repoRoot,
 		stateFile: filepath.Join(repoRoot, ".git", "arborist-state"),
+		register:  register.Load(filepath.Join(repoRoot, ".git", "arborist-register.json")),
 	}
 }
 

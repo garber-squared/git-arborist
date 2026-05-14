@@ -3,11 +3,13 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/garber-squared/git-arborist/internal/agent"
+	"github.com/garber-squared/git-arborist/internal/register"
 )
 
 const (
@@ -44,7 +46,7 @@ func (m *Model) renderNormalView() string {
 	b.WriteString("\n  Worktree Dashboard\n")
 
 	if len(m.rows) == 0 {
-		b.WriteString("\n  No worktrees.\n")
+		b.WriteString(m.renderEmptyState())
 		b.WriteString("\n  r: refresh  q: quit\n")
 		return b.String()
 	}
@@ -277,6 +279,63 @@ func styleAgent(display, name string, activity agent.Activity) string {
 		return styleWaiting.Render(display)
 	default:
 		return styleIdle.Render(display)
+	}
+}
+
+func (m *Model) renderEmptyState() string {
+	var b strings.Builder
+
+	closed := m.register.RecentlyClosed()
+	if len(closed) == 0 {
+		b.WriteString("\n  No worktrees yet.\n")
+		return b.String()
+	}
+
+	b.WriteString("\n  No open worktrees.\n")
+	b.WriteString("\n  " + styleDim.Render("Recently closed:") + "\n")
+	for _, c := range closed {
+		b.WriteString("    " + formatClosedEntry(c) + "\n")
+	}
+	return b.String()
+}
+
+func formatClosedEntry(c register.ClosedEntry) string {
+	branch := c.Branch
+	if branch == "" {
+		branch = "(unknown)"
+	}
+	branchPart := lipgloss.NewStyle().Bold(true).Render(branch)
+	meta := styleDim.Render(fmt.Sprintf("%s · %s", reasonLabel(c.Reason), relativeTime(c.ClosedAt)))
+	return fmt.Sprintf("%s  %s", branchPart, meta)
+}
+
+func reasonLabel(reason string) string {
+	switch reason {
+	case register.ReasonMerged:
+		return "PR merged"
+	case register.ReasonDeleted:
+		return "deleted"
+	case register.ReasonExternal:
+		return "removed externally"
+	default:
+		return "closed"
+	}
+}
+
+func relativeTime(t time.Time) string {
+	if t.IsZero() {
+		return "unknown time"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 	}
 }
 
