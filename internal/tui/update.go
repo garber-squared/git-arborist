@@ -14,6 +14,7 @@ import (
 	"github.com/garber-squared/git-arborist/internal/docker"
 	"github.com/garber-squared/git-arborist/internal/gitstatus"
 	"github.com/garber-squared/git-arborist/internal/pr"
+	"github.com/garber-squared/git-arborist/internal/register"
 	"github.com/garber-squared/git-arborist/internal/tmux"
 	"github.com/garber-squared/git-arborist/internal/watcher"
 	"github.com/garber-squared/git-arborist/internal/worktree"
@@ -98,6 +99,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.message = fmt.Sprintf("delete failed: %v", err)
 					return m, nil
 				}
+				m.register.RecordClose(row.Worktree.Path, row.Worktree.Branch, register.ReasonDeleted)
+				_ = m.register.Save()
 				m.message = fmt.Sprintf("Deleted worktree '%s'", row.Worktree.Branch)
 				m.refreshAll()
 			}
@@ -240,6 +243,7 @@ func (m *Model) refreshAll() {
 	wg.Wait()
 
 	// Skip main worktree (index 0), filter out stale worktrees (merged PR)
+	currentPaths := make(map[string]bool)
 	var rows []Row
 	for i, row := range allRows {
 		if i == 0 {
@@ -253,10 +257,15 @@ func (m *Model) refreshAll() {
 			}
 			_ = docker.RemoveContainersForWorktree(row.Worktree.Path)
 			_ = worktree.ForceRemove(row.Worktree.Path)
+			m.register.RecordClose(row.Worktree.Path, row.Worktree.Branch, register.ReasonMerged)
 			continue
 		}
+		currentPaths[row.Worktree.Path] = true
+		m.register.RecordOpen(row.Worktree.Path, row.Worktree.Branch)
 		rows = append(rows, row)
 	}
+	m.register.Reconcile(currentPaths)
+	_ = m.register.Save()
 	m.rows = rows
 	if m.cursorIdx >= len(m.rows) {
 		m.cursorIdx = max(0, len(m.rows)-1)
