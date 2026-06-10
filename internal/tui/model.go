@@ -48,17 +48,22 @@ type Model struct {
 	stateFile string
 	restored  bool
 
+	// Path to focus on first open (overrides stateFile)
+	focusPath string
+
+
 	// Tracks open + recently-closed worktrees so the empty state can
 	// distinguish "nothing yet" from "you just closed your last one".
 	register *register.Register
 }
 
 // NewModel creates a new dashboard model.
-func NewModel(repoRoot string) Model {
+func NewModel(repoRoot, focusPath string) Model {
 	return Model{
 		repoRoot:  repoRoot,
 		stateFile: filepath.Join(repoRoot, ".git", "arborist-state"),
 		register:  register.Load(filepath.Join(repoRoot, ".git", "arborist-register.json")),
+		focusPath: focusPath,
 	}
 }
 

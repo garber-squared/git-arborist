@@ -158,7 +158,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refreshAll()
 		m.message = ""
 
-	case msg.String() == "s":
+	case msg.String() == "e":
 		if m.cursorIdx < len(m.rows) {
 			row := m.rows[m.cursorIdx]
 			if row.PaneTarget != "" {
@@ -166,6 +166,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.message = fmt.Sprintf("send-keys failed: %v", err)
 				} else {
 					m.message = fmt.Sprintf("Sent Enter to %s", row.Worktree.Branch)
+				}
+			} else {
+				m.message = "No tmux pane found for this worktree"
+			}
+		}
+
+	case msg.String() == "t":
+		if m.cursorIdx < len(m.rows) {
+			row := m.rows[m.cursorIdx]
+			if row.PaneTarget != "" {
+				if err := tmux.SendKeys(row.PaneTarget, "Tab", "Enter"); err != nil {
+					m.message = fmt.Sprintf("send-keys failed: %v", err)
+				} else {
+					m.message = fmt.Sprintf("Sent Tab+Enter to %s", row.Worktree.Branch)
 				}
 			} else {
 				m.message = "No tmux pane found for this worktree"
@@ -273,13 +287,28 @@ func (m *Model) refreshAll() {
 
 	if !m.restored {
 		m.restored = true
-		if data, err := os.ReadFile(m.stateFile); err == nil {
-			saved := strings.TrimSpace(string(data))
+		matched := false
+		if m.focusPath != "" {
+			fp := strings.TrimRight(m.focusPath, "/")
 			for i, row := range m.rows {
-				if row.Worktree.Path == saved {
+				wtp := strings.TrimRight(row.Worktree.Path, "/")
+				if fp == wtp || strings.HasPrefix(fp, wtp+"/") {
 					m.cursorIdx = i
 					m.ensureCursorVisible()
+					matched = true
 					break
+				}
+			}
+		}
+		if !matched {
+			if data, err := os.ReadFile(m.stateFile); err == nil {
+				saved := strings.TrimSpace(string(data))
+				for i, row := range m.rows {
+					if row.Worktree.Path == saved {
+						m.cursorIdx = i
+						m.ensureCursorVisible()
+						break
+					}
 				}
 			}
 		}
