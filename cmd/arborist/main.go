@@ -18,7 +18,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	m := tui.NewModel(repoRoot)
+	focusPath, _ := os.Getwd()
+
+	m := tui.NewModel(repoRoot, focusPath)
 	p := tea.NewProgram(&m, tea.WithAltScreen())
 
 	// Wire up the send function so the model can create watchers
