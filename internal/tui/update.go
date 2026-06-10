@@ -117,7 +117,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "up", "esc":
 			m.expanded = false
 			return m, nil
-		case "h", "l", "left", "right", "d", "r", "g", "s":
+		case "h", "l", "left", "right", "j", "k", "down", "d", "r", "g", "s":
 			return m, nil
 		case "q", "ctrl+c":
 			m.expanded = false
@@ -149,6 +149,30 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursorIdx++
 		}
 		m.ensureCursorVisible()
+
+	case msg.String() == "j" || msg.String() == "down":
+		if m.visibleCols > 0 && m.gridRows > 1 {
+			col := m.cursorIdx % m.visibleCols
+			row := m.cursorIdx / m.visibleCols
+			if row+1 < m.gridRows {
+				target := (row+1)*m.visibleCols + col
+				if target >= len(m.rows) {
+					target = len(m.rows) - 1
+				}
+				m.cursorIdx = target
+				m.ensureCursorVisible()
+			}
+		}
+
+	case msg.String() == "k":
+		if m.visibleCols > 0 && m.gridRows > 1 {
+			col := m.cursorIdx % m.visibleCols
+			row := m.cursorIdx / m.visibleCols
+			if row > 0 {
+				m.cursorIdx = (row-1)*m.visibleCols + col
+				m.ensureCursorVisible()
+			}
+		}
 
 	case msg.String() == "up":
 		m.expanded = true

@@ -39,10 +39,13 @@ type Model struct {
 	expanded   bool
 
 	// Layout
-	visibleCols int // tiles visible at once: min(len(rows), 3)
+	visibleCols int // grid columns
+	gridRows    int // total rows in grid
+	visibleRows int // rows visible at once (capped at 4)
 	tileW       int
 	tileH       int
-	scrollCol   int // index of leftmost visible tile
+	scrollCol   int // single-row horizontal scroll (legacy)
+	scrollRow   int // grid vertical scroll (for >9 items)
 
 	// Persist cursor across sessions
 	stateFile string
