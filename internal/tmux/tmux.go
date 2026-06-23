@@ -118,6 +118,12 @@ func ListPanes() ([]PaneTarget, error) {
 	return panes, nil
 }
 
+// NewWindow creates a new tmux window in the current session rooted at path,
+// named after the branch. Returns an error if tmux is unavailable.
+func NewWindow(path, name string) error {
+	return exec.Command("tmux", "new-window", "-c", path, "-n", name).Run()
+}
+
 // SendKeys sends keys to a tmux pane.
 func SendKeys(target string, keys ...string) error {
 	args := append([]string{"send-keys", "-t", target}, keys...)
