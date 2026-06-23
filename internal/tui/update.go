@@ -328,7 +328,7 @@ func (m *Model) refreshAll() {
 		if i == 0 {
 			continue // skip main worktree (repo root)
 		}
-		if row.PR != nil && row.PR.State == "MERGED" {
+		if row.PR != nil && (row.PR.State == "MERGED" || row.PR.State == "CLOSED") {
 			if row.AgentState != nil && row.AgentState.TMUX.Session != "" {
 				_ = tmux.KillWindow(row.AgentState.TMUX.Session, row.AgentState.TMUX.Window)
 			} else {
@@ -336,7 +336,11 @@ func (m *Model) refreshAll() {
 			}
 			_ = docker.RemoveContainersForWorktree(row.Worktree.Path)
 			_ = worktree.ForceRemove(row.Worktree.Path)
-			m.register.RecordClose(row.Worktree.Path, row.Worktree.Branch, register.ReasonMerged)
+			reason := register.ReasonMerged
+			if row.PR.State == "CLOSED" {
+				reason = register.ReasonClosed
+			}
+			m.register.RecordClose(row.Worktree.Path, row.Worktree.Branch, reason)
 			continue
 		}
 		currentPaths[row.Worktree.Path] = true
@@ -380,6 +384,12 @@ func (m *Model) refreshAll() {
 	}
 
 	m.refreshAgents()
+	m.refreshPaneTargets()
+	for _, row := range m.rows {
+		if row.PaneTarget == "" {
+			_ = tmux.NewWindow(row.Worktree.Path, row.Worktree.Branch)
+		}
+	}
 	m.refreshPaneTargets()
 	m.refreshPaneContent()
 

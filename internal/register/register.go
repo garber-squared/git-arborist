@@ -15,6 +15,7 @@ const maxClosed = 10
 // Reasons a worktree may have been closed.
 const (
 	ReasonMerged   = "merged"   // auto-removed because its PR was merged
+	ReasonClosed   = "closed"   // auto-removed because its PR was closed without merging
 	ReasonDeleted  = "deleted"  // user pressed `d` in the dashboard
 	ReasonExternal = "external" // disappeared between refreshes without arborist removing it
 )
