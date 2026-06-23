@@ -117,7 +117,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "up", "esc":
 			m.expanded = false
 			return m, nil
-		case "h", "l", "left", "right", "j", "k", "down", "d", "r", "g", "s":
+		case "h", "l", "left", "right", "j", "k", "down", "d", "r", "g", "s", "n", "N":
 			return m, nil
 		case "q", "ctrl+c":
 			m.expanded = false
@@ -208,6 +208,47 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				m.message = "No tmux pane found for this worktree"
 			}
+		}
+
+	case msg.String() == "n":
+		if m.cursorIdx < len(m.rows) {
+			row := m.rows[m.cursorIdx]
+			if row.PaneTarget != "" {
+				m.message = fmt.Sprintf("tmux pane already exists for '%s'", row.Worktree.Branch)
+			} else {
+				if err := tmux.NewWindow(row.Worktree.Path, row.Worktree.Branch); err != nil {
+					m.message = fmt.Sprintf("tmux new-window failed: %v", err)
+				} else {
+					m.message = fmt.Sprintf("Created tmux window for '%s'", row.Worktree.Branch)
+					m.refreshPaneTargets()
+					m.refreshPaneContent()
+				}
+			}
+		}
+
+	case msg.String() == "N":
+		var created, failed int
+		for _, row := range m.rows {
+			if row.PaneTarget != "" {
+				continue
+			}
+			if err := tmux.NewWindow(row.Worktree.Path, row.Worktree.Branch); err != nil {
+				failed++
+			} else {
+				created++
+			}
+		}
+		m.refreshPaneTargets()
+		m.refreshPaneContent()
+		switch {
+		case failed > 0 && created > 0:
+			m.message = fmt.Sprintf("Created %d tmux windows (%d failed)", created, failed)
+		case failed > 0:
+			m.message = fmt.Sprintf("Failed to create %d tmux windows", failed)
+		case created == 0:
+			m.message = "All worktrees already have tmux windows"
+		default:
+			m.message = fmt.Sprintf("Created %d tmux windows", created)
 		}
 
 	case msg.String() == "enter":
