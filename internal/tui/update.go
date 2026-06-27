@@ -95,7 +95,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// Stop and delete any docker compose containers tied to this worktree
 				_ = docker.RemoveContainersForWorktree(row.Worktree.Path)
 				// Remove worktree
-				if err := worktree.Remove(row.Worktree.Path); err != nil {
+				if err := worktree.Remove(row.Worktree); err != nil {
 					m.message = fmt.Sprintf("delete failed: %v", err)
 					return m, nil
 				}
@@ -297,8 +297,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) refreshAll() {
-	worktree.Prune(m.repoRoot)
-	worktrees, err := worktree.Discover(m.repoRoot)
+	worktrees, err := worktree.DiscoverAll(m.repoRoot)
 	if err != nil {
 		m.message = fmt.Sprintf("discovery error: %v", err)
 		return
@@ -324,9 +323,9 @@ func (m *Model) refreshAll() {
 	// Skip main worktree (index 0), filter out stale worktrees (merged PR)
 	currentPaths := make(map[string]bool)
 	var rows []Row
-	for i, row := range allRows {
-		if i == 0 {
-			continue // skip main worktree (repo root)
+	for _, row := range allRows {
+		if row.Worktree.IsMain {
+			continue // skip main worktrees (superproject root + submodule git dirs)
 		}
 		if row.PR != nil && (row.PR.State == "MERGED" || row.PR.State == "CLOSED") {
 			if row.AgentState != nil && row.AgentState.TMUX.Session != "" {
@@ -335,7 +334,7 @@ func (m *Model) refreshAll() {
 				_ = tmux.KillWindowByPath(row.Worktree.Path)
 			}
 			_ = docker.RemoveContainersForWorktree(row.Worktree.Path)
-			_ = worktree.ForceRemove(row.Worktree.Path)
+			_ = worktree.ForceRemove(row.Worktree)
 			reason := register.ReasonMerged
 			if row.PR.State == "CLOSED" {
 				reason = register.ReasonClosed

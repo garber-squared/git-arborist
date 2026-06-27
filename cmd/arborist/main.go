@@ -33,9 +33,25 @@ func main() {
 	}
 }
 
+// gitRepoRoot returns the dashboard's root repository. When invoked from inside
+// a submodule (its main checkout or one of its linked worktrees), it resolves
+// up to the superproject working tree so the dashboard reflects the whole
+// superproject rather than just the submodule.
 func gitRepoRoot() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	out, err := cmd.Output()
+	// A submodule's git directory lives under <superproject>/.git/modules/<name>.
+	// Splitting the common git dir on that segment yields the superproject root,
+	// and this works even for linked worktrees where
+	// --show-superproject-working-tree reports nothing.
+	if commonDir, err := gitOutput("rev-parse", "--path-format=absolute", "--git-common-dir"); err == nil {
+		if idx := strings.Index(commonDir, "/.git/modules/"); idx >= 0 {
+			return commonDir[:idx], nil
+		}
+	}
+	return gitOutput("rev-parse", "--show-toplevel")
+}
+
+func gitOutput(args ...string) (string, error) {
+	out, err := exec.Command("git", args...).Output()
 	if err != nil {
 		return "", err
 	}

@@ -7,7 +7,7 @@ include .env
 # =============================================================================
 # TUI Dashboard
 # =============================================================================
-.PHONY: dashboard tui go-build
+.PHONY: dashboard tui go-build install
 
 # Launch the worktree dashboard TUI
 dashboard: go-build
@@ -18,6 +18,11 @@ tui: dashboard
 # Build the Go binary
 go-build:
 	@go build -o bin/arborist ./cmd/arborist
+
+# Build and install the binary to ~/bin (the location on PATH)
+install:
+	@go build -o $(HOME)/bin/arborist ./cmd/arborist
+	@echo "Installed arborist to $(HOME)/bin/arborist"
 
 # =============================================================================
 # Documentation Commands
