@@ -29,7 +29,32 @@ var (
 	borderSelected   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("4")).Background(lipgloss.Color("#2b2a1a")) // blue border + gentle yellow bg
 	borderUnselected = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8"))                                    // dim gray
 	borderExpanded   = lipgloss.NewStyle().Border(lipgloss.DoubleBorder()).BorderForeground(lipgloss.Color("4")).Background(lipgloss.Color("#2b2a1a"))
+
+	// repoPalette holds subtle, distinct colors used to tint submodule tiles so
+	// worktrees from different submodules can be told apart at a glance. All
+	// blue/teal/purple tones are omitted because blue signals selection.
+	repoPalette = []lipgloss.Color{
+		lipgloss.Color("108"), // green
+		lipgloss.Color("173"), // orange
+		lipgloss.Color("180"), // tan
+		lipgloss.Color("222"), // gold
+		lipgloss.Color("175"), // pink
+		lipgloss.Color("168"), // rose
+	}
 )
+
+// repoColor returns a stable color for a submodule name. Worktrees belonging to
+// the superproject (repo == "") have no tint.
+func repoColor(repo string) (lipgloss.Color, bool) {
+	if repo == "" {
+		return lipgloss.Color(""), false
+	}
+	var sum int
+	for _, b := range []byte(repo) {
+		sum += int(b)
+	}
+	return repoPalette[sum%len(repoPalette)], true
+}
 
 // View renders the tiled dashboard.
 func (m *Model) View() string {
@@ -228,8 +253,11 @@ func (m *Model) ensureCursorVisible() {
 
 func (m *Model) renderTile(row Row, selected bool) string {
 	var style lipgloss.Style
-	if selected {
+	if c, ok := repoColor(row.Worktree.Repo); selected {
 		style = borderSelected
+	} else if ok {
+		// Tint the border with the submodule's color when not selected.
+		style = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(c)
 	} else {
 		style = borderUnselected
 	}
@@ -248,8 +276,11 @@ func (m *Model) renderTileAt(row Row, tileW, tileH int, style lipgloss.Style) st
 	branchStyle := lipgloss.NewStyle().Bold(true)
 	header := branchStyle.Render(branch)
 
-	// Info line: agent | git status | PR#
+	// Info line: submodule | agent | git status | PR#
 	var infoParts []string
+	if c, ok := repoColor(row.Worktree.Repo); ok {
+		infoParts = append(infoParts, lipgloss.NewStyle().Foreground(c).Render(row.Worktree.Repo))
+	}
 	if row.ActiveAgent != "" {
 		infoParts = append(infoParts, styleAgent(row.ActiveAgent, row.ActiveAgent, row.AgentActivity))
 	}
