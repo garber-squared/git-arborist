@@ -13,6 +13,23 @@ import (
 	"github.com/garber-squared/git-arborist/internal/worktree"
 )
 
+// ViewScope controls which worktrees the dashboard displays.
+type ViewScope int
+
+const (
+	// ScopeAll shows worktrees for the superproject and all its submodules.
+	ScopeAll ViewScope = iota
+	// ScopeRoot shows only worktrees belonging to the superproject root.
+	ScopeRoot
+)
+
+func (s ViewScope) String() string {
+	if s == ScopeRoot {
+		return "root"
+	}
+	return "all"
+}
+
 // Row represents a single worktree tile in the dashboard.
 type Row struct {
 	Worktree      worktree.Worktree
@@ -37,6 +54,7 @@ type Model struct {
 	message  string
 	confirming bool
 	expanded   bool
+	scope      ViewScope // which worktrees to display (all vs. root-only)
 
 	// Layout
 	visibleCols int // grid columns
