@@ -182,6 +182,29 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refreshAll()
 		m.message = ""
 
+	case msg.String() == "s":
+		if m.scope == ScopeAll {
+			m.scope = ScopeRoot
+		} else {
+			m.scope = ScopeAll
+		}
+		// Keep the focused worktree selected across the toggle when it
+		// survives the new scope; otherwise clamp to a valid tile.
+		var focused string
+		if m.cursorIdx < len(m.rows) {
+			focused = m.rows[m.cursorIdx].Worktree.Path
+		}
+		m.refreshAll()
+		m.cursorIdx = 0
+		for i, row := range m.rows {
+			if row.Worktree.Path == focused {
+				m.cursorIdx = i
+				break
+			}
+		}
+		m.ensureCursorVisible()
+		m.message = fmt.Sprintf("Scope: %s", m.scope)
+
 	case msg.String() == "e":
 		if m.cursorIdx < len(m.rows) {
 			row := m.rows[m.cursorIdx]
@@ -344,6 +367,11 @@ func (m *Model) refreshAll() {
 		}
 		currentPaths[row.Worktree.Path] = true
 		m.register.RecordOpen(row.Worktree.Path, row.Worktree.Branch)
+		// Bookkeeping above tracks every live worktree so close-detection
+		// stays accurate; the scope filter only affects what is displayed.
+		if m.scope == ScopeRoot && row.Worktree.Repo != "" {
+			continue
+		}
 		rows = append(rows, row)
 	}
 	m.register.Reconcile(currentPaths)
