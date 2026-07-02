@@ -32,7 +32,7 @@ func KillWindow(session string, window int) error {
 // KillWindowByPath finds a tmux window whose pane current path matches
 // the given directory and kills it.
 func KillWindowByPath(path string) error {
-	cmd := exec.Command("tmux", "list-windows", "-a", "-F", "#{session_name}:#{window_index} #{pane_current_path}")
+	cmd := exec.Command("tmux", "list-windows", "-a", "-F", "#{session_name}:#{window_index}\t#{pane_current_path}")
 	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("tmux list-windows: %w", err)
@@ -42,10 +42,9 @@ func KillWindowByPath(path string) error {
 		if len(line) == 0 {
 			continue
 		}
-		var target, panePath string
-		n, _ := fmt.Sscanf(line, "%s %s", &target, &panePath)
-		if n == 2 && panePath == path {
-			return exec.Command("tmux", "kill-window", "-t", target).Run()
+		parts := splitTab(line)
+		if len(parts) == 2 && normalizePath(parts[1]) == path {
+			return exec.Command("tmux", "kill-window", "-t", parts[0]).Run()
 		}
 	}
 	return fmt.Errorf("no tmux window found for path %s", path)
@@ -55,7 +54,7 @@ func KillWindowByPath(path string) error {
 // matches the given directory and switches to it.
 func FindWindowByPath(path string) error {
 	// List all windows with their pane current paths
-	cmd := exec.Command("tmux", "list-windows", "-a", "-F", "#{session_name}:#{window_index} #{pane_current_path}")
+	cmd := exec.Command("tmux", "list-windows", "-a", "-F", "#{session_name}:#{window_index}\t#{pane_current_path}")
 	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("tmux list-windows: %w", err)
@@ -65,11 +64,10 @@ func FindWindowByPath(path string) error {
 		if len(line) == 0 {
 			continue
 		}
-		// Format: "session:window /path/to/dir"
-		var target, panePath string
-		n, _ := fmt.Sscanf(line, "%s %s", &target, &panePath)
-		if n == 2 && panePath == path {
-			return exec.Command("tmux", "select-window", "-t", target).Run()
+		// Format: "session:window\t/path/to/dir"
+		parts := splitTab(line)
+		if len(parts) == 2 && normalizePath(parts[1]) == path {
+			return exec.Command("tmux", "select-window", "-t", parts[0]).Run()
 		}
 	}
 	return fmt.Errorf("no tmux window found for path %s", path)
@@ -112,7 +110,7 @@ func ListPanes() ([]PaneTarget, error) {
 			if parts[0] == self {
 				continue
 			}
-			panes = append(panes, PaneTarget{Target: parts[0], Path: parts[1]})
+			panes = append(panes, PaneTarget{Target: parts[0], Path: normalizePath(parts[1])})
 		}
 	}
 	return panes, nil
@@ -138,6 +136,15 @@ func CapturePaneContent(target string) string {
 		return ""
 	}
 	return string(out)
+}
+
+// normalizePath strips the " (deleted)" suffix the kernel appends to a
+// process's cwd (and hence tmux's pane_current_path) when the directory it
+// points at has been removed. Without this, a pane whose shell is sitting in a
+// removed-and-recreated worktree would never match the worktree's real path,
+// causing arborist to treat it as absent and spawn duplicate windows.
+func normalizePath(s string) string {
+	return strings.TrimSuffix(s, " (deleted)")
 }
 
 func splitTab(s string) []string {
