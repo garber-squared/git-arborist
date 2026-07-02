@@ -47,7 +47,33 @@ func gitRepoRoot() (string, error) {
 			return commonDir[:idx], nil
 		}
 	}
+
+	// We are in the superproject. --show-toplevel would report a linked
+	// worktree's own path (e.g. a feature worktree), not the main checkout.
+	// Per-submodule discovery needs the main checkout: a submodule inside a
+	// linked worktree resolves back to the superproject's git dir, so listing
+	// its worktrees from there yields the superproject's worktrees instead of
+	// the submodule's — surfacing the same worktree once per submodule. The
+	// main worktree is the first entry of `git worktree list`.
+	if main, err := mainWorktree(); err == nil {
+		return main, nil
+	}
 	return gitOutput("rev-parse", "--show-toplevel")
+}
+
+// mainWorktree returns the path of the current repository's main worktree,
+// which `git worktree list` always reports first.
+func mainWorktree() (string, error) {
+	out, err := gitOutput("worktree", "list", "--porcelain")
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if path, ok := strings.CutPrefix(line, "worktree "); ok {
+			return strings.TrimSpace(path), nil
+		}
+	}
+	return "", fmt.Errorf("no worktree found")
 }
 
 func gitOutput(args ...string) (string, error) {
