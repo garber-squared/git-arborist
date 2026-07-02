@@ -23,6 +23,21 @@ import (
 // refreshMsg triggers a full data refresh.
 type refreshMsg struct{}
 
+// prFetchedMsg carries the PR lookup for a single worktree, fetched in the
+// background so the dashboard can render tiles before the (network-bound)
+// GitHub queries complete.
+type prFetchedMsg struct {
+	wt worktree.Worktree
+	pr *pr.PullRequest
+}
+
+// fetchPRCmd looks up the PR for a worktree off the main update loop.
+func fetchPRCmd(wt worktree.Worktree) tea.Cmd {
+	return func() tea.Msg {
+		return prFetchedMsg{wt: wt, pr: pr.Fetch(wt.Path)}
+	}
+}
+
 // agentTickMsg triggers a periodic agent detection refresh.
 type agentTickMsg struct{}
 
@@ -62,7 +77,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 
 	case refreshMsg:
-		m.refreshAll()
+		return m, m.refreshAll()
+
+	case prFetchedMsg:
+		m.applyPR(msg.wt, msg.pr)
 
 	case agentTickMsg:
 		m.refreshAgents()
@@ -84,6 +102,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.confirming {
 		if msg.String() == "d" {
 			m.confirming = false
+			var cmd tea.Cmd
 			if m.cursorIdx < len(m.rows) {
 				row := m.rows[m.cursorIdx]
 				// Kill tmux window
@@ -102,22 +121,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.register.RecordClose(row.Worktree.Path, row.Worktree.Branch, register.ReasonDeleted)
 				_ = m.register.Save()
 				m.message = fmt.Sprintf("Deleted worktree '%s'", row.Worktree.Branch)
-				m.refreshAll()
+				cmd = m.refreshAll()
 			}
-		} else {
-			m.confirming = false
-			m.message = ""
+			return m, cmd
 		}
+		m.confirming = false
+		m.message = ""
 		return m, nil
 	}
 
 	// Handle expanded overlay state
 	if m.expanded {
 		switch msg.String() {
-		case "up", "esc":
+		case "h", "esc":
 			m.expanded = false
 			return m, nil
-		case "h", "l", "left", "right", "j", "k", "down", "d", "r", "g", "s", "n", "N":
+		case "l", "left", "right", "up", "j", "k", "down", "d", "r", "g", "s", "n", "N":
 			return m, nil
 		case "q", "ctrl+c":
 			m.expanded = false
@@ -138,7 +157,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 
-	case msg.String() == "h" || msg.String() == "left":
+	case msg.String() == "h":
+		m.expanded = true
+
+	case msg.String() == "left":
 		if m.cursorIdx > 0 {
 			m.cursorIdx--
 		}
@@ -164,7 +186,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case msg.String() == "k":
+	case msg.String() == "k" || msg.String() == "up":
 		if m.visibleCols > 0 && m.gridRows > 1 {
 			col := m.cursorIdx % m.visibleCols
 			row := m.cursorIdx / m.visibleCols
@@ -174,13 +196,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case msg.String() == "up":
-		m.expanded = true
-
 	case msg.String() == "r":
-		m.message = "Refreshing..."
-		m.refreshAll()
 		m.message = ""
+		return m, m.refreshAll()
 
 	case msg.String() == "s":
 		if m.scope == ScopeAll {
@@ -194,7 +212,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursorIdx < len(m.rows) {
 			focused = m.rows[m.cursorIdx].Worktree.Path
 		}
-		m.refreshAll()
+		cmd := m.refreshAll()
 		m.cursorIdx = 0
 		for i, row := range m.rows {
 			if row.Worktree.Path == focused {
@@ -204,6 +222,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.ensureCursorVisible()
 		m.message = fmt.Sprintf("Scope: %s", m.scope)
+		return m, cmd
 
 	case msg.String() == "e":
 		if m.cursorIdx < len(m.rows) {
@@ -319,14 +338,29 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) refreshAll() {
+// refreshAll rediscovers worktrees and repopulates the dashboard. Fast, local
+// data (git status, agent state) is gathered synchronously so tiles render
+// immediately; the network-bound PR lookups run in the background via the
+// returned command, and merged/closed worktrees are pruned when those return
+// (see applyPR).
+func (m *Model) refreshAll() tea.Cmd {
 	worktrees, err := worktree.DiscoverAll(m.repoRoot)
 	if err != nil {
 		m.message = fmt.Sprintf("discovery error: %v", err)
-		return
+		return nil
 	}
 
-	// Fetch all worktree data in parallel
+	// Carry over already-known PR data so a refresh doesn't blank the PR
+	// badges until the background lookups return.
+	prevPR := make(map[string]*pr.PullRequest, len(m.rows))
+	for _, row := range m.rows {
+		if row.PR != nil {
+			prevPR[row.Worktree.Path] = row.PR
+		}
+	}
+
+	// Gather fast, local data in parallel. The PR lookup is network-bound and
+	// deferred to the background command below.
 	allRows := make([]Row, len(worktrees))
 	var wg sync.WaitGroup
 	for i, wt := range worktrees {
@@ -336,35 +370,24 @@ func (m *Model) refreshAll() {
 			allRows[i] = Row{
 				Worktree:   wt,
 				GitStatus:  gitstatus.Get(wt.Path),
-				PR:         pr.Fetch(wt.Path),
 				AgentState: agent.ReadState(wt.Path),
+				PR:         prevPR[wt.Path],
 			}
 		}(i, wt)
 	}
 	wg.Wait()
 
-	// Skip main worktree (index 0), filter out stale worktrees (merged PR)
+	// Skip main worktrees; record bookkeeping and apply the scope filter for
+	// display. Every non-main worktree gets a background PR lookup so that
+	// merged/closed ones are pruned even when hidden by the current scope.
 	currentPaths := make(map[string]bool)
 	var rows []Row
+	var cmds []tea.Cmd
 	for _, row := range allRows {
 		if row.Worktree.IsMain {
 			continue // skip main worktrees (superproject root + submodule git dirs)
 		}
-		if row.PR != nil && (row.PR.State == "MERGED" || row.PR.State == "CLOSED") {
-			if row.AgentState != nil && row.AgentState.TMUX.Session != "" {
-				_ = tmux.KillWindow(row.AgentState.TMUX.Session, row.AgentState.TMUX.Window)
-			} else {
-				_ = tmux.KillWindowByPath(row.Worktree.Path)
-			}
-			_ = docker.RemoveContainersForWorktree(row.Worktree.Path)
-			_ = worktree.ForceRemove(row.Worktree)
-			reason := register.ReasonMerged
-			if row.PR.State == "CLOSED" {
-				reason = register.ReasonClosed
-			}
-			m.register.RecordClose(row.Worktree.Path, row.Worktree.Branch, reason)
-			continue
-		}
+		cmds = append(cmds, fetchPRCmd(row.Worktree))
 		currentPaths[row.Worktree.Path] = true
 		m.register.RecordOpen(row.Worktree.Path, row.Worktree.Branch)
 		// Bookkeeping above tracks every live worktree so close-detection
@@ -431,6 +454,59 @@ func (m *Model) refreshAll() {
 			for _, row := range m.rows {
 				w.WatchWorktree(row.Worktree.Path)
 			}
+		}
+	}
+
+	return tea.Batch(cmds...)
+}
+
+// applyPR records a background PR lookup on the matching tile. A merged or
+// closed PR means the branch is done: its tmux window, containers, and
+// worktree are torn down and the tile removed.
+func (m *Model) applyPR(wt worktree.Worktree, p *pr.PullRequest) {
+	if p != nil && (p.State == "MERGED" || p.State == "CLOSED") {
+		var st *agent.State
+		for i := range m.rows {
+			if m.rows[i].Worktree.Path == wt.Path {
+				st = m.rows[i].AgentState
+				break
+			}
+		}
+		if st != nil && st.TMUX.Session != "" {
+			_ = tmux.KillWindow(st.TMUX.Session, st.TMUX.Window)
+		} else {
+			_ = tmux.KillWindowByPath(wt.Path)
+		}
+		_ = docker.RemoveContainersForWorktree(wt.Path)
+		_ = worktree.ForceRemove(wt)
+		reason := register.ReasonMerged
+		if p.State == "CLOSED" {
+			reason = register.ReasonClosed
+		}
+		m.register.RecordClose(wt.Path, wt.Branch, reason)
+		_ = m.register.Save()
+		m.removeRowByPath(wt.Path)
+		return
+	}
+	for i := range m.rows {
+		if m.rows[i].Worktree.Path == wt.Path {
+			m.rows[i].PR = p
+			return
+		}
+	}
+}
+
+// removeRowByPath drops the tile for the given worktree path and keeps the
+// cursor within bounds.
+func (m *Model) removeRowByPath(path string) {
+	for i := range m.rows {
+		if m.rows[i].Worktree.Path == path {
+			m.rows = append(m.rows[:i], m.rows[i+1:]...)
+			if m.cursorIdx >= len(m.rows) {
+				m.cursorIdx = max(0, len(m.rows)-1)
+			}
+			m.ensureCursorVisible()
+			return
 		}
 	}
 }
