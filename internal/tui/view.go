@@ -124,9 +124,9 @@ func (m *Model) renderNormalView() string {
 
 	// Help
 	if m.gridRows > 1 {
-		b.WriteString("\n  ←↑↓→: navigate  j/k: pane down/up  h: expand/collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  g: git status  d: delete  s: scope  r: refresh  q: quit\n")
+		b.WriteString("\n  ←↑↓→: navigate  j/k: pane down/up  h: expand  l: collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  g: git status  d: delete  s: scope  r: refresh  q: quit\n")
 	} else {
-		b.WriteString("\n  ←/→: navigate  j/k: pane down/up  h: expand/collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  g: git status  d: delete  s: scope  r: refresh  q: quit\n")
+		b.WriteString("\n  ←/→: navigate  j/k: pane down/up  h: expand  l: collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  g: git status  d: delete  s: scope  r: refresh  q: quit\n")
 	}
 
 	return b.String()
@@ -148,7 +148,7 @@ func (m *Model) renderExpandedView() string {
 	tile := m.renderTileAt(row, expW, expH, borderExpanded)
 
 	// Help line below the tile
-	help := "  esc/up: close  enter: tmux jump  o: open PR  q: quit"
+	help := "  l/esc: collapse  j/k: pane down/up  enter: tmux jump  o: open PR  q: quit"
 
 	content := tile + "\n" + help
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)

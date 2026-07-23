@@ -133,10 +133,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Handle expanded overlay state
 	if m.expanded {
 		switch msg.String() {
-		case "h", "esc":
+		case "l", "esc":
+			// Return to the normal pane view.
 			m.expanded = false
 			return m, nil
-		case "l", "left", "right", "up", "j", "k", "down", "d", "r", "g", "s", "n", "N":
+		case "j":
+			m.sendToPane("Down")
+			return m, nil
+		case "k":
+			m.sendToPane("Up")
+			return m, nil
+		case "left", "right", "up", "down", "h", "d", "r", "g", "s", "n", "N":
 			return m, nil
 		case "q", "ctrl+c":
 			m.expanded = false
@@ -160,13 +167,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.String() == "h":
 		m.expanded = true
 
+	case msg.String() == "l":
+		// l is reserved for returning to the normal pane view; in the normal
+		// view (not expanded) it is a no-op.
+
 	case msg.String() == "left":
 		if m.cursorIdx > 0 {
 			m.cursorIdx--
 		}
 		m.ensureCursorVisible()
 
-	case msg.String() == "l" || msg.String() == "right":
+	case msg.String() == "right":
 		if m.cursorIdx < len(m.rows)-1 {
 			m.cursorIdx++
 		}
@@ -197,32 +208,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case msg.String() == "j":
-		if m.cursorIdx < len(m.rows) {
-			row := m.rows[m.cursorIdx]
-			if row.PaneTarget != "" {
-				if err := tmux.SendKeys(row.PaneTarget, "Down"); err != nil {
-					m.message = fmt.Sprintf("send-keys failed: %v", err)
-				} else {
-					m.message = fmt.Sprintf("Sent Down to %s", row.Worktree.Branch)
-				}
-			} else {
-				m.message = "No tmux pane found for this worktree"
-			}
-		}
+		m.sendToPane("Down")
 
 	case msg.String() == "k":
-		if m.cursorIdx < len(m.rows) {
-			row := m.rows[m.cursorIdx]
-			if row.PaneTarget != "" {
-				if err := tmux.SendKeys(row.PaneTarget, "Up"); err != nil {
-					m.message = fmt.Sprintf("send-keys failed: %v", err)
-				} else {
-					m.message = fmt.Sprintf("Sent Up to %s", row.Worktree.Branch)
-				}
-			} else {
-				m.message = "No tmux pane found for this worktree"
-			}
-		}
+		m.sendToPane("Up")
 
 	case msg.String() == "r":
 		m.message = ""
@@ -364,6 +353,25 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// sendToPane forwards a tmux key name (e.g. "Down", "Up") to the focused
+// worktree's tmux pane so the user can drive an agent's option list from the
+// dashboard.
+func (m *Model) sendToPane(key string) {
+	if m.cursorIdx >= len(m.rows) {
+		return
+	}
+	row := m.rows[m.cursorIdx]
+	if row.PaneTarget == "" {
+		m.message = "No tmux pane found for this worktree"
+		return
+	}
+	if err := tmux.SendKeys(row.PaneTarget, key); err != nil {
+		m.message = fmt.Sprintf("send-keys failed: %v", err)
+	} else {
+		m.message = fmt.Sprintf("Sent %s to %s", key, row.Worktree.Branch)
+	}
 }
 
 // refreshAll rediscovers worktrees and repopulates the dashboard. Fast, local
