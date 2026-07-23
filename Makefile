@@ -11,18 +11,19 @@ include .env
 
 # Launch the worktree dashboard TUI
 dashboard: go-build
-	./bin/arborist
+	./arborist
 
 tui: dashboard
 
-# Build the Go binary
+# Build the Go binary to the repo root. The ~/bin and ~/.local/bin entries on
+# PATH symlink to ./arborist, so building here refreshes the installed binary.
 go-build:
-	@go build -o bin/arborist ./cmd/arborist
+	@go build -o arborist ./cmd/arborist
 
-# Build and install the binary to ~/bin (the location on PATH)
-install:
-	@go build -o $(HOME)/bin/arborist ./cmd/arborist
-	@echo "Installed arborist to $(HOME)/bin/arborist"
+# Build the binary and (re)create the PATH symlink pointing at it.
+install: go-build
+	@ln -sf $(CURDIR)/arborist $(HOME)/bin/arborist
+	@echo "Linked $(HOME)/bin/arborist -> $(CURDIR)/arborist"
 
 # =============================================================================
 # Documentation Commands
