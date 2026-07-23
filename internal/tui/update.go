@@ -218,9 +218,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.refreshAll()
 
 	case msg.String() == "s":
-		if m.scope == ScopeAll {
+		switch m.scope {
+		case ScopeAll:
 			m.scope = ScopeRoot
-		} else {
+		case ScopeRoot:
+			m.scope = ScopeSubmodules
+		default:
 			m.scope = ScopeAll
 		}
 		// Keep the focused worktree selected across the toggle when it
@@ -429,6 +432,9 @@ func (m *Model) refreshAll() tea.Cmd {
 		// Bookkeeping above tracks every live worktree so close-detection
 		// stays accurate; the scope filter only affects what is displayed.
 		if m.scope == ScopeRoot && row.Worktree.Repo != "" {
+			continue
+		}
+		if m.scope == ScopeSubmodules && row.Worktree.Repo == "" {
 			continue
 		}
 		rows = append(rows, row)
