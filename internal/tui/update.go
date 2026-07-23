@@ -172,7 +172,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.ensureCursorVisible()
 
-	case msg.String() == "j" || msg.String() == "down":
+	case msg.String() == "down":
 		if m.visibleCols > 0 && m.gridRows > 1 {
 			col := m.cursorIdx % m.visibleCols
 			row := m.cursorIdx / m.visibleCols
@@ -186,13 +186,41 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case msg.String() == "k" || msg.String() == "up":
+	case msg.String() == "up":
 		if m.visibleCols > 0 && m.gridRows > 1 {
 			col := m.cursorIdx % m.visibleCols
 			row := m.cursorIdx / m.visibleCols
 			if row > 0 {
 				m.cursorIdx = (row-1)*m.visibleCols + col
 				m.ensureCursorVisible()
+			}
+		}
+
+	case msg.String() == "j":
+		if m.cursorIdx < len(m.rows) {
+			row := m.rows[m.cursorIdx]
+			if row.PaneTarget != "" {
+				if err := tmux.SendKeys(row.PaneTarget, "Down"); err != nil {
+					m.message = fmt.Sprintf("send-keys failed: %v", err)
+				} else {
+					m.message = fmt.Sprintf("Sent Down to %s", row.Worktree.Branch)
+				}
+			} else {
+				m.message = "No tmux pane found for this worktree"
+			}
+		}
+
+	case msg.String() == "k":
+		if m.cursorIdx < len(m.rows) {
+			row := m.rows[m.cursorIdx]
+			if row.PaneTarget != "" {
+				if err := tmux.SendKeys(row.PaneTarget, "Up"); err != nil {
+					m.message = fmt.Sprintf("send-keys failed: %v", err)
+				} else {
+					m.message = fmt.Sprintf("Sent Up to %s", row.Worktree.Branch)
+				}
+			} else {
+				m.message = "No tmux pane found for this worktree"
 			}
 		}
 
