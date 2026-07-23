@@ -21,13 +21,19 @@ const (
 	ScopeAll ViewScope = iota
 	// ScopeRoot shows only worktrees belonging to the superproject root.
 	ScopeRoot
+	// ScopeSubmodules shows only worktrees belonging to submodules.
+	ScopeSubmodules
 )
 
 func (s ViewScope) String() string {
-	if s == ScopeRoot {
+	switch s {
+	case ScopeRoot:
 		return "root"
+	case ScopeSubmodules:
+		return "submodules"
+	default:
+		return "all"
 	}
-	return "all"
 }
 
 // Row represents a single worktree tile in the dashboard.
