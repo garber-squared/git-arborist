@@ -131,9 +131,9 @@ func (m *Model) renderNormalView() string {
 
 	// Help
 	if m.gridRows > 1 {
-		b.WriteString("\n  ←↑↓→: navigate  j/k: pane down/up  i: insert text  h: expand  l: collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  g: git status  d: delete  s: scope (all/root/submodules)  r: refresh  q: quit\n")
+		b.WriteString("\n  ←↑↓→: navigate  j/k: pane down/up  i: insert text  h: expand  l: collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  I: open issue  g: git status  d: delete  s: scope (all/root/submodules)  r: refresh  q: quit\n")
 	} else {
-		b.WriteString("\n  ←/→: navigate  j/k: pane down/up  i: insert text  h: expand  l: collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  g: git status  d: delete  s: scope (all/root/submodules)  r: refresh  q: quit\n")
+		b.WriteString("\n  ←/→: navigate  j/k: pane down/up  i: insert text  h: expand  l: collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  I: open issue  g: git status  d: delete  s: scope (all/root/submodules)  r: refresh  q: quit\n")
 	}
 
 	return b.String()
@@ -155,7 +155,7 @@ func (m *Model) renderExpandedView() string {
 	tile := m.renderTileAt(row, expW, expH, borderExpanded)
 
 	// Help line below the tile; insert mode swaps it for the text input.
-	help := "  l/esc: collapse  j/k: pane down/up  i: insert text  enter: tmux jump  o: open PR  q: quit"
+	help := "  l/esc: collapse  j/k: pane down/up  i: insert text  enter: tmux jump  o: open PR  I: open issue  q: quit"
 	if m.inserting {
 		help = "  " + m.input.View() + "\n  enter: send to pane  esc: cancel"
 	}
