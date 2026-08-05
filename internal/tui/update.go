@@ -56,6 +56,19 @@ func paneTickCmd() tea.Cmd {
 	})
 }
 
+// paneRefreshMsg triggers a one-shot refresh of the focused pane (unlike
+// paneTickMsg it does not re-arm a recurring tick).
+type paneRefreshMsg struct{}
+
+// paneRefreshCmd re-captures the focused pane shortly after keys are sent to
+// it, so the tile reflects the send immediately instead of waiting for the
+// next 2s tick. The small delay gives the pane's program time to redraw.
+func paneRefreshCmd() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
+		return paneRefreshMsg{}
+	})
+}
+
 // Init initializes the model.
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
@@ -91,6 +104,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshPaneContent()
 		return m, paneTickCmd()
 
+	case paneRefreshMsg:
+		m.refreshFocusedPane()
+
 	case watcher.FileChangedMsg:
 		m.refreshRow(msg.WorktreePath, msg.Kind)
 	}
@@ -119,10 +135,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			if err := tmux.SendText(row.PaneTarget, text); err != nil {
 				m.message = fmt.Sprintf("send-keys failed: %v", err)
-			} else {
-				m.message = fmt.Sprintf("Sent text to %s", row.Worktree.Branch)
+				return m, nil
 			}
-			return m, nil
+			m.message = fmt.Sprintf("Sent text to %s", row.Worktree.Branch)
+			return m, paneRefreshCmd()
 		case "esc":
 			m.inserting = false
 			m.input.Blur()
@@ -173,11 +189,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.expanded = false
 			return m, nil
 		case "j":
-			m.sendToPane("Down")
-			return m, nil
+			return m, m.sendToPane("Down")
 		case "k":
-			m.sendToPane("Up")
-			return m, nil
+			return m, m.sendToPane("Up")
 		case "left", "right", "up", "down", "h", "d", "r", "g", "s", "n", "N":
 			return m, nil
 		case "q", "ctrl+c":
@@ -243,10 +257,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case msg.String() == "j":
-		m.sendToPane("Down")
+		return m, m.sendToPane("Down")
 
 	case msg.String() == "k":
-		m.sendToPane("Up")
+		return m, m.sendToPane("Up")
 
 	case msg.String() == "r":
 		m.message = ""
@@ -287,6 +301,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.message = fmt.Sprintf("send-keys failed: %v", err)
 				} else {
 					m.message = fmt.Sprintf("Sent Enter to %s", row.Worktree.Branch)
+					return m, paneRefreshCmd()
 				}
 			} else {
 				m.message = "No tmux pane found for this worktree"
@@ -301,6 +316,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.message = fmt.Sprintf("send-keys failed: %v", err)
 				} else {
 					m.message = fmt.Sprintf("Sent Tab+Enter to %s", row.Worktree.Branch)
+					return m, paneRefreshCmd()
 				}
 			} else {
 				m.message = "No tmux pane found for this worktree"
@@ -388,6 +404,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case msg.String() == "I":
+		if m.cursorIdx < len(m.rows) {
+			row := m.rows[m.cursorIdx]
+			num := pr.IssueNumberFromBranch(row.Worktree.Branch)
+			if num == "" {
+				m.message = fmt.Sprintf("No issue number in branch name '%s'", row.Worktree.Branch)
+			} else if err := pr.OpenIssueInBrowser(row.Worktree.Path, num); err != nil {
+				m.message = fmt.Sprintf("gh issue view %s failed: %v", num, err)
+			}
+		}
+
 	case msg.String() == "g":
 		if m.cursorIdx < len(m.rows) {
 			row := m.rows[m.cursorIdx]
@@ -409,20 +436,31 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // sendToPane forwards a tmux key name (e.g. "Down", "Up") to the focused
 // worktree's tmux pane so the user can drive an agent's option list from the
-// dashboard.
-func (m *Model) sendToPane(key string) {
+// dashboard. On success it returns a command that re-captures the pane.
+func (m *Model) sendToPane(key string) tea.Cmd {
 	if m.cursorIdx >= len(m.rows) {
-		return
+		return nil
 	}
 	row := m.rows[m.cursorIdx]
 	if row.PaneTarget == "" {
 		m.message = "No tmux pane found for this worktree"
-		return
+		return nil
 	}
 	if err := tmux.SendKeys(row.PaneTarget, key); err != nil {
 		m.message = fmt.Sprintf("send-keys failed: %v", err)
-	} else {
-		m.message = fmt.Sprintf("Sent %s to %s", key, row.Worktree.Branch)
+		return nil
+	}
+	m.message = fmt.Sprintf("Sent %s to %s", key, row.Worktree.Branch)
+	return paneRefreshCmd()
+}
+
+// refreshFocusedPane re-captures only the focused row's pane content.
+func (m *Model) refreshFocusedPane() {
+	if m.cursorIdx >= len(m.rows) {
+		return
+	}
+	if target := m.rows[m.cursorIdx].PaneTarget; target != "" {
+		m.rows[m.cursorIdx].PaneContent = tmux.CapturePaneContent(target)
 	}
 }
 

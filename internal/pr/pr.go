@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 )
 
 type PullRequest struct {
@@ -40,6 +41,23 @@ func Fetch(worktreePath string) *PullRequest {
 // OpenInBrowser opens the PR for the given worktree in the default browser.
 func OpenInBrowser(worktreePath string) error {
 	cmd := exec.Command("gh", "pr", "view", "--web")
+	cmd.Dir = worktreePath
+	return cmd.Run()
+}
+
+var issueNumberRe = regexp.MustCompile(`\d+`)
+
+// IssueNumberFromBranch treats the first run of digits in a branch name as
+// the linked issue number (covers "123-fix", "feature/123-fix", "gh-123").
+// Returns "" when the branch name contains no number.
+func IssueNumberFromBranch(branch string) string {
+	return issueNumberRe.FindString(branch)
+}
+
+// OpenIssueInBrowser opens the issue linked to the worktree's branch in the
+// default browser. gh resolves the repo from the worktree directory.
+func OpenIssueInBrowser(worktreePath, issueNumber string) error {
+	cmd := exec.Command("gh", "issue", "view", issueNumber, "--web")
 	cmd.Dir = worktreePath
 	return cmd.Run()
 }
