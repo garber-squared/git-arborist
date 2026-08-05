@@ -117,6 +117,13 @@ func (m *Model) renderNormalView() string {
 		b.WriteString("\n")
 	}
 
+	// Insert-mode input takes over the footer while active.
+	if m.inserting {
+		b.WriteString("\n  " + m.input.View() + "\n")
+		b.WriteString("\n  enter: send to pane  esc: cancel\n")
+		return b.String()
+	}
+
 	// Status message
 	if m.message != "" {
 		b.WriteString("  " + m.message + "\n")
@@ -124,9 +131,9 @@ func (m *Model) renderNormalView() string {
 
 	// Help
 	if m.gridRows > 1 {
-		b.WriteString("\n  ←↑↓→: navigate  j/k: pane down/up  h: expand  l: collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  g: git status  d: delete  s: scope (all/root/submodules)  r: refresh  q: quit\n")
+		b.WriteString("\n  ←↑↓→: navigate  j/k: pane down/up  i: insert text  h: expand  l: collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  g: git status  d: delete  s: scope (all/root/submodules)  r: refresh  q: quit\n")
 	} else {
-		b.WriteString("\n  ←/→: navigate  j/k: pane down/up  h: expand  l: collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  g: git status  d: delete  s: scope (all/root/submodules)  r: refresh  q: quit\n")
+		b.WriteString("\n  ←/→: navigate  j/k: pane down/up  i: insert text  h: expand  l: collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  g: git status  d: delete  s: scope (all/root/submodules)  r: refresh  q: quit\n")
 	}
 
 	return b.String()
@@ -147,8 +154,11 @@ func (m *Model) renderExpandedView() string {
 
 	tile := m.renderTileAt(row, expW, expH, borderExpanded)
 
-	// Help line below the tile
-	help := "  l/esc: collapse  j/k: pane down/up  enter: tmux jump  o: open PR  q: quit"
+	// Help line below the tile; insert mode swaps it for the text input.
+	help := "  l/esc: collapse  j/k: pane down/up  i: insert text  enter: tmux jump  o: open PR  q: quit"
+	if m.inserting {
+		help = "  " + m.input.View() + "\n  enter: send to pane  esc: cancel"
+	}
 
 	content := tile + "\n" + help
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
