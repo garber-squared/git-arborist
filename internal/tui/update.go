@@ -72,6 +72,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.input.Width = max(20, m.width-10)
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -98,6 +99,40 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Insert mode captures every key until the text is sent or cancelled.
+	if m.inserting {
+		switch msg.String() {
+		case "enter":
+			m.inserting = false
+			m.input.Blur()
+			text := m.input.Value()
+			if text == "" {
+				return m, nil
+			}
+			if m.cursorIdx >= len(m.rows) {
+				return m, nil
+			}
+			row := m.rows[m.cursorIdx]
+			if row.PaneTarget == "" {
+				m.message = "No tmux pane found for this worktree"
+				return m, nil
+			}
+			if err := tmux.SendText(row.PaneTarget, text); err != nil {
+				m.message = fmt.Sprintf("send-keys failed: %v", err)
+			} else {
+				m.message = fmt.Sprintf("Sent text to %s", row.Worktree.Branch)
+			}
+			return m, nil
+		case "esc":
+			m.inserting = false
+			m.input.Blur()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	}
+
 	// Handle confirmation state first
 	if m.confirming {
 		if msg.String() == "d" {
@@ -269,6 +304,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			} else {
 				m.message = "No tmux pane found for this worktree"
+			}
+		}
+
+	case msg.String() == "i":
+		if m.cursorIdx < len(m.rows) {
+			row := m.rows[m.cursorIdx]
+			if row.PaneTarget == "" {
+				m.message = "No tmux pane found for this worktree"
+			} else {
+				m.inserting = true
+				m.message = ""
+				m.input.SetValue("")
+				m.input.Width = max(20, m.width-10)
+				return m, m.input.Focus()
 			}
 		}
 

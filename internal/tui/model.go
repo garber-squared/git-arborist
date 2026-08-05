@@ -3,6 +3,7 @@ package tui
 import (
 	"path/filepath"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/garber-squared/git-arborist/internal/agent"
@@ -60,7 +61,9 @@ type Model struct {
 	message  string
 	confirming bool
 	expanded   bool
-	scope      ViewScope // which worktrees to display (all vs. root-only)
+	inserting  bool            // insert mode: typing text destined for the focused pane
+	input      textinput.Model // insert-mode text field
+	scope      ViewScope       // which worktrees to display (all vs. root-only)
 
 	// Layout
 	visibleCols int // grid columns
@@ -86,11 +89,14 @@ type Model struct {
 
 // NewModel creates a new dashboard model.
 func NewModel(repoRoot, focusPath string) Model {
+	ti := textinput.New()
+	ti.Prompt = "> "
 	return Model{
 		repoRoot:  repoRoot,
 		stateFile: filepath.Join(repoRoot, ".git", "arborist-state"),
 		register:  register.Load(filepath.Join(repoRoot, ".git", "arborist-register.json")),
 		focusPath: focusPath,
+		input:     ti,
 	}
 }
 

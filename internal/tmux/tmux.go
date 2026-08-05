@@ -128,6 +128,14 @@ func SendKeys(target string, keys ...string) error {
 	return exec.Command("tmux", args...).Run()
 }
 
+// SendText types literal text into a tmux pane and submits it with Enter.
+func SendText(target, text string) error {
+	if err := exec.Command("tmux", "send-keys", "-t", target, "-l", "--", text).Run(); err != nil {
+		return err
+	}
+	return exec.Command("tmux", "send-keys", "-t", target, "Enter").Run()
+}
+
 // CapturePaneContent grabs the visible text from a tmux pane.
 func CapturePaneContent(target string) string {
 	cmd := exec.Command("tmux", "capture-pane", "-p", "-e", "-t", target)
