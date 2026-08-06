@@ -51,18 +51,21 @@ type Row struct {
 
 // Model is the Bubble Tea model for the dashboard.
 type Model struct {
-	rows     []Row
-	cursorIdx int
-	repoRoot string
-	watcher  *watcher.Watcher
-	sendFn   func(tea.Msg)
-	width    int
-	height   int
-	message  string
+	rows       []Row
+	cursorIdx  int
+	repoRoot   string
+	watcher    *watcher.Watcher
+	sendFn     func(tea.Msg)
+	width      int
+	height     int
+	message    string
 	confirming bool
 	expanded   bool
 	inserting  bool            // insert mode: typing text destined for the focused pane
 	input      textinput.Model // insert-mode text field
+	history    []string        // previously sent texts, oldest first
+	histSel    int             // index into filteredHistory(); -1 = typing in input
+	histFile   string          // persists history across sessions
 	scope      ViewScope       // which worktrees to display (all vs. root-only)
 
 	// Layout
@@ -81,7 +84,6 @@ type Model struct {
 	// Path to focus on first open (overrides stateFile)
 	focusPath string
 
-
 	// Tracks open + recently-closed worktrees so the empty state can
 	// distinguish "nothing yet" from "you just closed your last one".
 	register *register.Register
@@ -91,12 +93,16 @@ type Model struct {
 func NewModel(repoRoot, focusPath string) Model {
 	ti := textinput.New()
 	ti.Prompt = "> "
+	histFile := filepath.Join(repoRoot, ".git", "arborist-history")
 	return Model{
 		repoRoot:  repoRoot,
 		stateFile: filepath.Join(repoRoot, ".git", "arborist-state"),
 		register:  register.Load(filepath.Join(repoRoot, ".git", "arborist-register.json")),
 		focusPath: focusPath,
 		input:     ti,
+		history:   loadHistory(histFile),
+		histSel:   -1,
+		histFile:  histFile,
 	}
 }
 

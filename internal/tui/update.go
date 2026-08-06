@@ -116,12 +116,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Insert mode captures every key until the text is sent or cancelled.
+	// Up/down move a selection through the (fuzzy-filtered) history list
+	// rendered above the input; enter sends the selection if there is one,
+	// otherwise the typed text.
 	if m.inserting {
 		switch msg.String() {
 		case "enter":
-			m.inserting = false
-			m.input.Blur()
 			text := m.input.Value()
+			if filtered := m.filteredHistory(); m.histSel >= 0 && m.histSel < len(filtered) {
+				text = filtered[m.histSel]
+			}
+			m.inserting = false
+			m.histSel = -1
+			m.input.Blur()
 			if text == "" {
 				return m, nil
 			}
@@ -137,15 +144,41 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.message = fmt.Sprintf("send-keys failed: %v", err)
 				return m, nil
 			}
+			m.history = appendHistory(m.history, text)
+			saveHistory(m.histFile, m.history)
 			m.message = fmt.Sprintf("Sent text to %s", row.Worktree.Branch)
 			return m, paneRefreshCmd()
 		case "esc":
 			m.inserting = false
+			m.histSel = -1
 			m.input.Blur()
 			return m, nil
+		case "up":
+			if filtered := m.filteredHistory(); len(filtered) > 0 {
+				if m.histSel == -1 {
+					m.histSel = len(filtered) - 1
+				} else if m.histSel > 0 {
+					m.histSel--
+				}
+			}
+			return m, nil
+		case "down":
+			if m.histSel >= 0 {
+				m.histSel++
+				if m.histSel >= len(m.filteredHistory()) {
+					m.histSel = -1
+				}
+			}
+			return m, nil
 		}
+		// Typing changes the filter, so any prior selection no longer points
+		// at what the user saw — drop it.
+		before := m.input.Value()
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
+		if m.input.Value() != before {
+			m.histSel = -1
+		}
 		return m, cmd
 	}
 
@@ -330,6 +363,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.message = "No tmux pane found for this worktree"
 			} else {
 				m.inserting = true
+				m.histSel = -1
 				m.message = ""
 				m.input.SetValue("")
 				m.input.Width = max(20, m.width-10)
