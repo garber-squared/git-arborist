@@ -27,7 +27,7 @@ var (
 	styleDim     = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // dim gray
 
 	borderSelected   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("4")).Background(lipgloss.Color("#2b2a1a")) // blue border + gentle yellow bg
-	borderUnselected = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8"))                                    // dim gray
+	borderUnselected = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8"))                                       // dim gray
 	borderExpanded   = lipgloss.NewStyle().Border(lipgloss.DoubleBorder()).BorderForeground(lipgloss.Color("4")).Background(lipgloss.Color("#2b2a1a"))
 
 	// repoPalette holds subtle, distinct colors used to tint submodule tiles so
@@ -119,8 +119,7 @@ func (m *Model) renderNormalView() string {
 
 	// Insert-mode input takes over the footer while active.
 	if m.inserting {
-		b.WriteString("\n  " + m.input.View() + "\n")
-		b.WriteString("\n  enter: send to pane  esc: cancel\n")
+		b.WriteString("\n" + m.renderInsertFooter())
 		return b.String()
 	}
 
@@ -157,11 +156,54 @@ func (m *Model) renderExpandedView() string {
 	// Help line below the tile; insert mode swaps it for the text input.
 	help := "  l/esc: collapse  j/k: pane down/up  i: insert text  enter: tmux jump  o: open PR  I: open issue  q: quit"
 	if m.inserting {
-		help = "  " + m.input.View() + "\n  enter: send to pane  esc: cancel"
+		help = strings.TrimRight(m.renderInsertFooter(), "\n")
 	}
 
 	content := tile + "\n" + help
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
+// maxHistoryVisible caps how many history entries the insert footer shows.
+const maxHistoryVisible = 8
+
+var styleHistSelected = lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Bold(true)
+
+// renderInsertFooter renders the insert-mode UI: fuzzy-filtered history in
+// chronological order (most recent at the bottom, next to the input), the
+// text input, and a help line.
+func (m *Model) renderInsertFooter() string {
+	var b strings.Builder
+
+	filtered := m.filteredHistory()
+	// Show the window of entries ending at the most recent, shifted up when
+	// the selection moves above it.
+	start := 0
+	if len(filtered) > maxHistoryVisible {
+		start = len(filtered) - maxHistoryVisible
+	}
+	if m.histSel >= 0 && m.histSel < start {
+		start = m.histSel
+	}
+	end := start + maxHistoryVisible
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	lineW := m.width - 8
+	if lineW < 10 {
+		lineW = 10
+	}
+	for i := start; i < end; i++ {
+		entry := truncateToWidth(filtered[i], lineW)
+		if i == m.histSel {
+			b.WriteString("  " + styleHistSelected.Render("▸ "+entry) + "\n")
+		} else {
+			b.WriteString("  " + styleDim.Render("  "+entry) + "\n")
+		}
+	}
+
+	b.WriteString("  " + m.input.View() + "\n")
+	b.WriteString("\n  enter: send to pane  ↑/↓: history  esc: cancel\n")
+	return b.String()
 }
 
 func (m *Model) computeLayout() {
