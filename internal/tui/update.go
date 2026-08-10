@@ -623,11 +623,12 @@ func (m *Model) refreshAll() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// applyPR records a background PR lookup on the matching tile. A merged or
-// closed PR means the branch is done: its tmux window, containers, and
-// worktree are torn down and the tile removed.
+// applyPR records a background PR lookup on the matching tile. A merged PR
+// means the branch is done: its tmux window, containers, and worktree are
+// torn down and the tile removed. A PR closed without merging is left alone —
+// the work usually still lives on the branch.
 func (m *Model) applyPR(wt worktree.Worktree, p *pr.PullRequest) {
-	if p != nil && (p.State == "MERGED" || p.State == "CLOSED") {
+	if p != nil && p.State == "MERGED" {
 		var st *agent.State
 		for i := range m.rows {
 			if m.rows[i].Worktree.Path == wt.Path {
@@ -642,11 +643,7 @@ func (m *Model) applyPR(wt worktree.Worktree, p *pr.PullRequest) {
 		}
 		_ = docker.RemoveContainersForWorktree(wt.Path)
 		_ = worktree.ForceRemove(wt)
-		reason := register.ReasonMerged
-		if p.State == "CLOSED" {
-			reason = register.ReasonClosed
-		}
-		m.register.RecordClose(wt.Path, wt.Branch, reason)
+		m.register.RecordClose(wt.Path, wt.Branch, register.ReasonMerged)
 		_ = m.register.Save()
 		m.removeRowByPath(wt.Path)
 		return
