@@ -1,6 +1,8 @@
 package worktree
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -98,13 +100,32 @@ func Prune(repoRoot string) {
 
 // Remove removes a worktree using git worktree remove, run from the worktree's
 // owning repository so it targets the correct repo for submodule worktrees.
+// It fails when the worktree has modified or untracked files; use ForceRemove
+// to delete it anyway.
 func Remove(wt Worktree) error {
-	return exec.Command("git", "-C", wt.RepoRoot, "worktree", "remove", wt.Path).Run()
+	return runGit(wt.RepoRoot, "worktree", "remove", wt.Path)
 }
 
 // ForceRemove removes a worktree even if it has uncommitted changes.
 func ForceRemove(wt Worktree) error {
-	return exec.Command("git", "-C", wt.RepoRoot, "worktree", "remove", "--force", wt.Path).Run()
+	return runGit(wt.RepoRoot, "worktree", "remove", "--force", wt.Path)
+}
+
+// runGit runs git in dir and, on failure, returns an error carrying git's own
+// stderr: a bare "exit status 128" tells the user nothing about what to do.
+func runGit(dir string, args ...string) error {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		return nil
+	}
+	if msg := strings.TrimSpace(stderr.String()); msg != "" {
+		msg = strings.TrimPrefix(strings.SplitN(msg, "\n", 2)[0], "fatal: ")
+		return errors.New(msg)
+	}
+	return err
 }
 
 func parsePorcelain(raw string) []Worktree {

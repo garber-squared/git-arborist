@@ -130,9 +130,9 @@ func (m *Model) renderNormalView() string {
 
 	// Help
 	if m.gridRows > 1 {
-		b.WriteString("\n  ←↑↓→: navigate  j/k: pane down/up  i: insert text  h: expand  l: collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  I: open issue  g: git status  d: delete  s: scope (all/root/submodules)  r: refresh  q: quit\n")
+		b.WriteString("\n  ←↑↓→: navigate  j/k: pane down/up  i: insert text  h: expand  l: collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  I: open issue  g: git status  d: delete (D: force)  s: scope (all/root/submodules)  r: refresh  q: quit\n")
 	} else {
-		b.WriteString("\n  ←/→: navigate  j/k: pane down/up  i: insert text  h: expand  l: collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  I: open issue  g: git status  d: delete  s: scope (all/root/submodules)  r: refresh  q: quit\n")
+		b.WriteString("\n  ←/→: navigate  j/k: pane down/up  i: insert text  h: expand  l: collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  I: open issue  g: git status  d: delete (D: force)  s: scope (all/root/submodules)  r: refresh  q: quit\n")
 	}
 
 	return b.String()

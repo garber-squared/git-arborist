@@ -60,13 +60,16 @@ type Model struct {
 	height     int
 	message    string
 	confirming bool
-	expanded   bool
-	inserting  bool            // insert mode: typing text destined for the focused pane
-	input      textinput.Model // insert-mode text field
-	history    []string        // previously sent texts, oldest first
-	histSel    int             // index into filteredHistory(); -1 = typing in input
-	histFile   string          // persists history across sessions
-	scope      ViewScope       // which worktrees to display (all vs. root-only)
+	// forceConfirming is the second confirmation shown when a plain delete
+	// was refused because the worktree has uncommitted changes.
+	forceConfirming bool
+	expanded        bool
+	inserting       bool            // insert mode: typing text destined for the focused pane
+	input           textinput.Model // insert-mode text field
+	history         []string        // previously sent texts, oldest first
+	histSel         int             // index into filteredHistory(); -1 = typing in input
+	histFile        string          // persists history across sessions
+	scope           ViewScope       // which worktrees to display (all vs. root-only)
 
 	// Layout
 	visibleCols int // grid columns

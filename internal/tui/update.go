@@ -186,30 +186,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.confirming {
 		if msg.String() == "d" {
 			m.confirming = false
-			var cmd tea.Cmd
-			if m.cursorIdx < len(m.rows) {
-				row := m.rows[m.cursorIdx]
-				// Kill tmux window
-				if row.AgentState != nil && row.AgentState.TMUX.Session != "" {
-					_ = tmux.KillWindow(row.AgentState.TMUX.Session, row.AgentState.TMUX.Window)
-				} else {
-					_ = tmux.KillWindowByPath(row.Worktree.Path)
-				}
-				// Stop and delete any docker compose containers tied to this worktree
-				_ = docker.RemoveContainersForWorktree(row.Worktree.Path)
-				// Remove worktree
-				if err := worktree.Remove(row.Worktree); err != nil {
-					m.message = fmt.Sprintf("delete failed: %v", err)
-					return m, nil
-				}
-				m.register.RecordClose(row.Worktree.Path, row.Worktree.Branch, register.ReasonDeleted)
-				_ = m.register.Save()
-				m.message = fmt.Sprintf("Deleted worktree '%s'", row.Worktree.Branch)
-				cmd = m.refreshAll()
-			}
-			return m, cmd
+			return m.deleteRow(false)
 		}
 		m.confirming = false
+		m.message = ""
+		return m, nil
+	}
+
+	// A dirty worktree needs a second, explicit confirmation before its
+	// uncommitted work is thrown away.
+	if m.forceConfirming {
+		m.forceConfirming = false
+		if msg.String() == "D" {
+			return m.deleteRow(true)
+		}
 		m.message = ""
 		return m, nil
 	}
@@ -740,4 +730,43 @@ func (m *Model) refreshRow(wtPath, kind string) {
 			return
 		}
 	}
+}
+
+// deleteRow tears down the worktree under the cursor: its tmux window, its
+// docker containers, and finally the worktree itself. The git removal runs
+// first so a refusal (uncommitted changes, a locked worktree) leaves the
+// worktree and its window intact rather than half torn down. When plain
+// removal is refused because the worktree is dirty, the user is asked to
+// confirm a force delete.
+func (m *Model) deleteRow(force bool) (tea.Model, tea.Cmd) {
+	if m.cursorIdx >= len(m.rows) {
+		return m, nil
+	}
+	row := m.rows[m.cursorIdx]
+
+	remove := worktree.Remove
+	if force {
+		remove = worktree.ForceRemove
+	}
+	if err := remove(row.Worktree); err != nil {
+		m.message = fmt.Sprintf("delete failed: %v", err)
+		if !force && !row.GitStatus.Clean {
+			m.forceConfirming = true
+			m.message = fmt.Sprintf("'%s' has uncommitted changes. Press D to delete anyway, any other key to cancel", row.Worktree.Branch)
+		}
+		return m, nil
+	}
+
+	if row.AgentState != nil && row.AgentState.TMUX.Session != "" {
+		_ = tmux.KillWindow(row.AgentState.TMUX.Session, row.AgentState.TMUX.Window)
+	} else {
+		_ = tmux.KillWindowByPath(row.Worktree.Path)
+	}
+	// Stop and delete any docker compose containers tied to this worktree.
+	_ = docker.RemoveContainersForWorktree(row.Worktree.Path)
+
+	m.register.RecordClose(row.Worktree.Path, row.Worktree.Branch, register.ReasonDeleted)
+	_ = m.register.Save()
+	m.message = fmt.Sprintf("Deleted worktree '%s'", row.Worktree.Branch)
+	return m, m.refreshAll()
 }
