@@ -121,8 +121,7 @@ func runGit(dir string, args ...string) error {
 	if err == nil {
 		return nil
 	}
-	if msg := strings.TrimSpace(stderr.String()); msg != "" {
-		msg = strings.TrimPrefix(strings.SplitN(msg, "\n", 2)[0], "fatal: ")
+	if msg := gitError(stderr.String()); msg != "" {
 		return errors.New(msg)
 	}
 	return err
@@ -138,8 +137,11 @@ func parsePorcelain(raw string) []Worktree {
 		case strings.HasPrefix(line, "worktree "):
 			current = Worktree{Path: strings.TrimPrefix(line, "worktree ")}
 		case strings.HasPrefix(line, "branch "):
+			// Keep the full branch name: filepath.Base would turn
+			// "refs/heads/ds/fix-thing" into "fix-thing", which no longer
+			// names a branch git (or the create picker) can resolve.
 			ref := strings.TrimPrefix(line, "branch ")
-			current.Branch = filepath.Base(ref)
+			current.Branch = strings.TrimPrefix(ref, "refs/heads/")
 		case line == "":
 			if current.Path != "" {
 				worktrees = append(worktrees, current)
@@ -151,4 +153,25 @@ func parsePorcelain(raw string) []Worktree {
 		worktrees = append(worktrees, current)
 	}
 	return worktrees
+}
+
+// gitError picks the useful line out of git's stderr. Commands like
+// `worktree add` print progress there before failing, so the first line is
+// often "Preparing worktree ..." rather than the reason; the fatal line is.
+func gitError(stderr string) string {
+	var last string
+	for _, line := range strings.Split(stderr, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if msg, ok := strings.CutPrefix(line, "fatal: "); ok {
+			return msg
+		}
+		if msg, ok := strings.CutPrefix(line, "error: "); ok {
+			return msg
+		}
+		last = line
+	}
+	return last
 }

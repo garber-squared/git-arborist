@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -79,14 +80,14 @@ type PaneTarget struct {
 	Path   string
 }
 
-// CurrentPane returns the target of the tmux pane running this process.
+// CurrentPane returns the id of the tmux pane running this process, or "" when
+// we are not inside tmux. tmux exports TMUX_PANE into every pane, which is the
+// only reliable way to identify our own pane: `display-message` reports the
+// session's *active* window, which stops being ours the moment we create a
+// window elsewhere — and mistaking a worktree's pane for our own makes
+// arborist think that worktree has no pane and spawn a duplicate window.
 func CurrentPane() string {
-	cmd := exec.Command("tmux", "display-message", "-p", "#{session_name}:#{window_index}.#{pane_index}")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+	return os.Getenv("TMUX_PANE")
 }
 
 // ListPanes returns all tmux panes with their targets and current paths,
@@ -94,7 +95,7 @@ func CurrentPane() string {
 func ListPanes() ([]PaneTarget, error) {
 	self := CurrentPane()
 
-	cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_path}")
+	cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_path}")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("tmux list-panes: %w", err)
@@ -102,16 +103,14 @@ func ListPanes() ([]PaneTarget, error) {
 
 	var panes []PaneTarget
 	for _, line := range splitLines(string(out)) {
-		if line == "" {
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) != 3 {
 			continue
 		}
-		parts := splitTab(line)
-		if len(parts) == 2 {
-			if parts[0] == self {
-				continue
-			}
-			panes = append(panes, PaneTarget{Target: parts[0], Path: normalizePath(parts[1])})
+		if self != "" && parts[0] == self {
+			continue
 		}
+		panes = append(panes, PaneTarget{Target: parts[1], Path: normalizePath(parts[2])})
 	}
 	return panes, nil
 }
@@ -120,6 +119,27 @@ func ListPanes() ([]PaneTarget, error) {
 // named after the branch. Returns an error if tmux is unavailable.
 func NewWindow(path, name string) error {
 	return exec.Command("tmux", "new-window", "-c", path, "-n", name).Run()
+}
+
+// NewWindowWithCommand creates a window rooted at path that runs cmdline and
+// then drops into an interactive shell, so the pane outlives the command —
+// whether it succeeds or fails — and stays typeable from the dashboard. Each
+// env entry ("VAR=value") is exported into the window. An empty cmdline gives
+// a plain window, exactly like NewWindow.
+func NewWindowWithCommand(path, name, cmdline string, env ...string) error {
+	if strings.TrimSpace(cmdline) == "" {
+		return NewWindow(path, name)
+	}
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+	args := []string{"new-window", "-c", path, "-n", name}
+	for _, e := range env {
+		args = append(args, "-e", e)
+	}
+	args = append(args, fmt.Sprintf("%s; exec %s", cmdline, shell))
+	return exec.Command("tmux", args...).Run()
 }
 
 // SendKeys sends keys to a tmux pane.
