@@ -16,7 +16,6 @@ const (
 	maxVisibleCols = 3
 	maxVisibleRows = 4
 	dashHeaderH    = 2 // title + blank
-	dashFooterH    = 3 // message + help + blank
 	minTileBodyH   = 3
 )
 
@@ -56,10 +55,136 @@ func repoColor(repo string) (lipgloss.Color, bool) {
 	return repoPalette[sum%len(repoPalette)], true
 }
 
+// helpItems returns the dashboard's key hints as separate items so the footer
+// can wrap them to the terminal width instead of running off the edge.
+func (m *Model) helpItems() []string {
+	nav := "←/→: navigate"
+	if m.gridRows > 1 {
+		nav = "←↑↓→: navigate"
+	}
+	return []string{
+		nav,
+		"j/k: pane down/up",
+		"i: insert text",
+		"h: expand",
+		"l: collapse",
+		"enter: tmux jump",
+		"c: new worktree",
+		"C: new worktree (watch)",
+		"n: new pane",
+		"N: new all panes",
+		"o: open PR",
+		"I: open issue",
+		"g: git status",
+		"d: delete (D: force)",
+		"s: scope (all/root/submodules)",
+		"r: refresh",
+		"q: quit",
+	}
+}
+
+func expandedHelpItems() []string {
+	return []string{
+		"l/esc: collapse",
+		"j/k: pane down/up",
+		"i: insert text",
+		"enter: tmux jump",
+		"c: new worktree",
+		"o: open PR",
+		"I: open issue",
+		"q: quit",
+	}
+}
+
+func emptyHelpItems() []string {
+	return []string{
+		"c: new worktree",
+		"C: new worktree (watch)",
+		"s: scope (all/root/submodules)",
+		"r: refresh",
+		"q: quit",
+	}
+}
+
+// wrapHelp packs hints into lines no wider than width, two spaces apart. A
+// hint is never split, so a line can still exceed width if one hint alone
+// does.
+func wrapHelp(items []string, width int) []string {
+	const sep = "  "
+	if width < 10 {
+		width = 10
+	}
+	var lines []string
+	line := ""
+	for _, item := range items {
+		switch {
+		case line == "":
+			line = item
+		case lipgloss.Width(line)+len(sep)+lipgloss.Width(item) <= width:
+			line += sep + item
+		default:
+			lines = append(lines, line)
+			line = item
+		}
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// renderHelp renders the footer's help lines, indented like the rest of the
+// dashboard.
+func renderHelp(lines []string) string {
+	var b strings.Builder
+	for _, line := range lines {
+		b.WriteString("  " + line + "\n")
+	}
+	return b.String()
+}
+
+// helpWidth is how wide a help line may be: the terminal minus the two-space
+// indent on each side.
+func (m *Model) helpWidth() int {
+	return max(10, m.width-4)
+}
+
+// wrappedHelp is the help for whichever view is on screen, wrapped to width.
+func (m *Model) wrappedHelp() []string {
+	if m.expanded {
+		return wrapHelp(expandedHelpItems(), m.helpWidth())
+	}
+	return wrapHelp(m.helpItems(), m.helpWidth())
+}
+
+// footerH is how many rows the footer occupies: the blank spacer, the status
+// message, and however many lines the help wrapped to.
+func (m *Model) footerH() int {
+	return 1 + m.messageH() + len(m.helpLines)
+}
+
+// messageH is how many rows the status message needs. The terminal wraps it,
+// and a message can be several lines to begin with (`g` shows a git status),
+// so a long one must not push the help off the bottom of the screen.
+func (m *Model) messageH() int {
+	if m.message == "" {
+		return 1 // the row stays reserved so the layout doesn't jump
+	}
+	w := m.helpWidth()
+	h := 0
+	for _, line := range strings.Split(strings.TrimRight(m.message, "\n"), "\n") {
+		h += max(1, (lipgloss.Width(line)+w-1)/w)
+	}
+	return h
+}
+
 // View renders the tiled dashboard.
 func (m *Model) View() string {
 	m.computeLayout()
 
+	if m.create.active {
+		return m.renderCreateView()
+	}
 	if m.expanded && m.cursorIdx < len(m.rows) {
 		return m.renderExpandedView()
 	}
@@ -73,7 +198,7 @@ func (m *Model) renderNormalView() string {
 
 	if len(m.rows) == 0 {
 		b.WriteString(m.renderEmptyState())
-		b.WriteString("\n  s: scope (all/root/submodules)  r: refresh  q: quit\n")
+		b.WriteString("\n" + renderHelp(m.helpLines))
 		return b.String()
 	}
 
@@ -129,11 +254,7 @@ func (m *Model) renderNormalView() string {
 	}
 
 	// Help
-	if m.gridRows > 1 {
-		b.WriteString("\n  ←↑↓→: navigate  j/k: pane down/up  i: insert text  h: expand  l: collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  I: open issue  g: git status  d: delete (D: force)  s: scope (all/root/submodules)  r: refresh  q: quit\n")
-	} else {
-		b.WriteString("\n  ←/→: navigate  j/k: pane down/up  i: insert text  h: expand  l: collapse  enter: tmux jump  n: new pane  N: new all panes  o: open PR  I: open issue  g: git status  d: delete (D: force)  s: scope (all/root/submodules)  r: refresh  q: quit\n")
-	}
+	b.WriteString("\n" + renderHelp(m.helpLines))
 
 	return b.String()
 }
@@ -146,15 +267,15 @@ func (m *Model) renderExpandedView() string {
 	if expW < 40 {
 		expW = 40
 	}
-	expH := m.height - dashHeaderH - dashFooterH
+	expH := m.height - dashHeaderH - m.footerH()
 	if expH < minTileBodyH+5 {
 		expH = minTileBodyH + 5
 	}
 
 	tile := m.renderTileAt(row, expW, expH, borderExpanded)
 
-	// Help line below the tile; insert mode swaps it for the text input.
-	help := "  l/esc: collapse  j/k: pane down/up  i: insert text  enter: tmux jump  o: open PR  I: open issue  q: quit"
+	// Help lines below the tile; insert mode swaps them for the text input.
+	help := strings.TrimRight(renderHelp(m.helpLines), "\n")
 	if m.inserting {
 		help = strings.TrimRight(m.renderInsertFooter(), "\n")
 	}
@@ -212,6 +333,7 @@ func (m *Model) computeLayout() {
 		m.visibleCols = 0
 		m.gridRows = 0
 		m.visibleRows = 0
+		m.helpLines = wrapHelp(emptyHelpItems(), m.helpWidth())
 		return
 	}
 
@@ -244,7 +366,11 @@ func (m *Model) computeLayout() {
 	}
 	m.tileW = w / m.visibleCols
 
-	available := m.height - dashHeaderH - dashFooterH
+	// The help footer wraps to as many lines as the width needs, and the tiles
+	// get the height that is left.
+	m.helpLines = m.wrappedHelp()
+
+	available := m.height - dashHeaderH - m.footerH()
 	minAvailable := (minTileBodyH + 5) * m.visibleRows
 	if available < minAvailable {
 		available = minAvailable
@@ -339,6 +465,9 @@ func (m *Model) renderTileAt(row Row, tileW, tileH int, style lipgloss.Style) st
 	infoParts = append(infoParts, row.GitStatus.String())
 	if row.PR != nil {
 		infoParts = append(infoParts, fmt.Sprintf("#%d", row.PR.Number))
+	}
+	if row.Port != 0 {
+		infoParts = append(infoParts, styleDim.Render(fmt.Sprintf(":%d", row.Port)))
 	}
 	infoLine := strings.Join(infoParts, " │ ")
 

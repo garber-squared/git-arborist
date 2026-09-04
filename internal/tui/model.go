@@ -47,6 +47,7 @@ type Row struct {
 	AgentActivity agent.Activity
 	PaneTarget    string // tmux target like "session:1.0"
 	PaneContent   string // captured pane text
+	Port          int    // dev port assigned to this worktree, 0 if none
 }
 
 // Model is the Bubble Tea model for the dashboard.
@@ -70,11 +71,13 @@ type Model struct {
 	histSel         int             // index into filteredHistory(); -1 = typing in input
 	histFile        string          // persists history across sessions
 	scope           ViewScope       // which worktrees to display (all vs. root-only)
+	create          createState     // interactive create-worktree flow (c)
 
 	// Layout
-	visibleCols int // grid columns
-	gridRows    int // total rows in grid
-	visibleRows int // rows visible at once (capped at 4)
+	helpLines   []string // footer help, wrapped to the terminal width
+	visibleCols int      // grid columns
+	gridRows    int      // total rows in grid
+	visibleRows int      // rows visible at once (capped at 4)
 	tileW       int
 	tileH       int
 	scrollCol   int // single-row horizontal scroll (legacy)
@@ -96,8 +99,11 @@ type Model struct {
 func NewModel(repoRoot, focusPath string) Model {
 	ti := textinput.New()
 	ti.Prompt = "> "
+	ci := textinput.New()
+	ci.Prompt = "> "
 	histFile := filepath.Join(repoRoot, ".git", "arborist-history")
 	return Model{
+		create:    createState{input: ci},
 		repoRoot:  repoRoot,
 		stateFile: filepath.Join(repoRoot, ".git", "arborist-state"),
 		register:  register.Load(filepath.Join(repoRoot, ".git", "arborist-register.json")),

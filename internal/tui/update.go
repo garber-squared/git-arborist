@@ -13,6 +13,7 @@ import (
 	"github.com/garber-squared/git-arborist/internal/agent"
 	"github.com/garber-squared/git-arborist/internal/docker"
 	"github.com/garber-squared/git-arborist/internal/gitstatus"
+	"github.com/garber-squared/git-arborist/internal/port"
 	"github.com/garber-squared/git-arborist/internal/pr"
 	"github.com/garber-squared/git-arborist/internal/register"
 	"github.com/garber-squared/git-arborist/internal/tmux"
@@ -86,6 +87,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.input.Width = max(20, m.width-10)
+		m.create.input.Width = m.createInputWidth()
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -107,6 +109,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case paneRefreshMsg:
 		m.refreshFocusedPane()
 
+	case createCandidatesMsg:
+		m.applyCandidates(msg)
+
+	case worktreeCreatedMsg:
+		return m, m.applyCreated(msg)
+
 	case watcher.FileChangedMsg:
 		m.refreshRow(msg.WorktreePath, msg.Kind)
 	}
@@ -115,6 +123,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// The create-worktree picker is modal: it owns every key until a worktree
+	// is created or the flow is cancelled.
+	if m.create.active {
+		return m.handleCreateKey(msg)
+	}
+
 	// Insert mode captures every key until the text is sent or cancelled.
 	// Up/down move a selection through the (fuzzy-filtered) history list
 	// rendered above the input; enter sends the selection if there is one,
@@ -367,10 +381,19 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if row.PaneTarget != "" {
 				m.message = fmt.Sprintf("tmux pane already exists for '%s'", row.Worktree.Branch)
 			} else {
-				if err := tmux.NewWindow(row.Worktree.Path, row.Worktree.Branch); err != nil {
+				// `n` and `N` are deliberate keypresses, so they run the
+				// repo's setup command like `c` does. refreshAll's window
+				// creation stays plain: it fires for every pane-less worktree
+				// on every refresh, so setup there would re-run installs and
+				// relaunch agents unprompted.
+				setup := worktree.WindowCommand(row.Worktree, worktree.ModeWork)
+				if err := tmux.NewWindowWithCommand(row.Worktree.Path, row.Worktree.Branch, setup, windowEnv(row.Worktree)...); err != nil {
 					m.message = fmt.Sprintf("tmux new-window failed: %v", err)
 				} else {
 					m.message = fmt.Sprintf("Created tmux window for '%s'", row.Worktree.Branch)
+					if setup != "" {
+						m.message += " · running setup command"
+					}
 					m.refreshPaneTargets()
 					m.refreshPaneContent()
 				}
@@ -378,15 +401,19 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case msg.String() == "N":
-		var created, failed int
+		var created, failed, withSetup int
 		for _, row := range m.rows {
 			if row.PaneTarget != "" {
 				continue
 			}
-			if err := tmux.NewWindow(row.Worktree.Path, row.Worktree.Branch); err != nil {
+			setup := worktree.WindowCommand(row.Worktree, worktree.ModeWork)
+			if err := tmux.NewWindowWithCommand(row.Worktree.Path, row.Worktree.Branch, setup, windowEnv(row.Worktree)...); err != nil {
 				failed++
 			} else {
 				created++
+				if setup != "" {
+					withSetup++
+				}
 			}
 		}
 		m.refreshPaneTargets()
@@ -400,6 +427,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.message = "All worktrees already have tmux windows"
 		default:
 			m.message = fmt.Sprintf("Created %d tmux windows", created)
+		}
+		if withSetup > 0 {
+			m.message += fmt.Sprintf(" · running setup in %d", withSetup)
 		}
 
 	case msg.String() == "enter":
@@ -448,6 +478,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.message = string(out)
 			}
 		}
+
+	case msg.String() == "c":
+		return m, m.openCreate(worktree.ModeWork)
+
+	case msg.String() == "C":
+		// Watch mode: set the worktree up, then watch its git status instead
+		// of starting an agent in it.
+		return m, m.openCreate(worktree.ModeWatch)
 
 	case msg.String() == "d":
 		if m.cursorIdx < len(m.rows) {
@@ -509,6 +547,15 @@ func (m *Model) refreshAll() tea.Cmd {
 		}
 	}
 
+	// One registry read per repository, shared by the rows below: the port is
+	// display data, so a refresh must not re-read it per worktree.
+	ports := make(map[string]*port.Registry)
+	for _, wt := range worktrees {
+		if _, ok := ports[wt.RepoRoot]; !ok {
+			ports[wt.RepoRoot] = port.Load(wt.RepoRoot)
+		}
+	}
+
 	// Gather fast, local data in parallel. The PR lookup is network-bound and
 	// deferred to the background command below.
 	allRows := make([]Row, len(worktrees))
@@ -522,6 +569,7 @@ func (m *Model) refreshAll() tea.Cmd {
 				GitStatus:  gitstatus.Get(wt.Path),
 				AgentState: agent.ReadState(wt.Path),
 				PR:         prevPR[wt.Path],
+				Port:       ports[wt.RepoRoot].Port(wt.Path),
 			}
 		}(i, wt)
 	}
@@ -633,6 +681,8 @@ func (m *Model) applyPR(wt worktree.Worktree, p *pr.PullRequest) {
 		}
 		_ = docker.RemoveContainersForWorktree(wt.Path)
 		_ = worktree.ForceRemove(wt)
+		// The containers holding this port are gone, so it can be reused.
+		_ = port.Load(wt.RepoRoot).Release(wt.Path)
 		m.register.RecordClose(wt.Path, wt.Branch, register.ReasonMerged)
 		_ = m.register.Save()
 		m.removeRowByPath(wt.Path)
@@ -764,6 +814,8 @@ func (m *Model) deleteRow(force bool) (tea.Model, tea.Cmd) {
 	}
 	// Stop and delete any docker compose containers tied to this worktree.
 	_ = docker.RemoveContainersForWorktree(row.Worktree.Path)
+	// With those gone the worktree's dev port is free for the next one.
+	_ = port.Load(row.Worktree.RepoRoot).Release(row.Worktree.Path)
 
 	m.register.RecordClose(row.Worktree.Path, row.Worktree.Branch, register.ReasonDeleted)
 	_ = m.register.Save()
