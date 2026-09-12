@@ -107,7 +107,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, paneTickCmd()
 
 	case paneRefreshMsg:
-		m.refreshFocusedPane()
+		m.refreshSentPanes()
 
 	case createCandidatesMsg:
 		m.applyCandidates(msg)
@@ -146,21 +146,32 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if text == "" {
 				return m, nil
 			}
-			if m.cursorIdx >= len(m.rows) {
+			targets := m.insertTargets()
+			if len(targets) == 0 {
 				return m, nil
 			}
-			row := m.rows[m.cursorIdx]
-			if row.PaneTarget == "" {
-				m.message = "No tmux pane found for this worktree"
-				return m, nil
+			var sent, failed []string
+			for _, row := range targets {
+				if row.PaneTarget == "" {
+					failed = append(failed, row.Worktree.Branch)
+					continue
+				}
+				if err := tmux.SendText(row.PaneTarget, text); err != nil {
+					failed = append(failed, row.Worktree.Branch)
+					continue
+				}
+				sent = append(sent, row.Worktree.Branch)
 			}
-			if err := tmux.SendText(row.PaneTarget, text); err != nil {
-				m.message = fmt.Sprintf("send-keys failed: %v", err)
+			if len(sent) == 0 {
+				m.message = fmt.Sprintf("send failed for %s", strings.Join(failed, ", "))
 				return m, nil
 			}
 			m.history = appendHistory(m.history, text)
 			saveHistory(m.histFile, m.history)
-			m.message = fmt.Sprintf("Sent text to %s", row.Worktree.Branch)
+			m.message = fmt.Sprintf("Sent text to %s", strings.Join(sent, ", "))
+			if len(failed) > 0 {
+				m.message += fmt.Sprintf(" (no pane: %s)", strings.Join(failed, ", "))
+			}
 			return m, paneRefreshCmd()
 		case "esc":
 			m.inserting = false
@@ -229,7 +240,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.sendToPane("Down")
 		case "k":
 			return m, m.sendToPane("Up")
-		case "left", "right", "up", "down", "h", "d", "r", "g", "s", "n", "N":
+		case "left", "right", "up", "down", "h", "d", "r", "g", "s", "n", "N", " ", "a":
 			return m, nil
 		case "q", "ctrl+c":
 			m.expanded = false
@@ -361,19 +372,51 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case msg.String() == "i":
-		if m.cursorIdx < len(m.rows) {
-			row := m.rows[m.cursorIdx]
-			if row.PaneTarget == "" {
-				m.message = "No tmux pane found for this worktree"
-			} else {
-				m.inserting = true
-				m.histSel = -1
-				m.message = ""
-				m.input.SetValue("")
-				m.input.Width = max(20, m.width-10)
-				return m, m.input.Focus()
+		targets := m.insertTargets()
+		if len(targets) == 0 {
+			break
+		}
+		hasPane := false
+		for _, row := range targets {
+			if row.PaneTarget != "" {
+				hasPane = true
+				break
 			}
 		}
+		if !hasPane {
+			m.message = "No tmux pane found for this worktree"
+			break
+		}
+		m.inserting = true
+		m.histSel = -1
+		m.message = ""
+		m.input.SetValue("")
+		m.input.Width = max(20, m.width-10)
+		return m, m.input.Focus()
+
+	case msg.String() == " ":
+		if m.cursorIdx < len(m.rows) {
+			path := m.rows[m.cursorIdx].Worktree.Path
+			if m.selected[path] {
+				delete(m.selected, path)
+			} else {
+				m.selected[path] = true
+			}
+			m.message = m.selectionMessage()
+		}
+
+	case msg.String() == "a":
+		if len(m.rows) > 0 && len(m.selected) == len(m.rows) {
+			m.clearSelection()
+		} else {
+			for _, row := range m.rows {
+				m.selected[row.Worktree.Path] = true
+			}
+			m.message = m.selectionMessage()
+		}
+
+	case msg.String() == "esc":
+		m.clearSelection()
 
 	case msg.String() == "n":
 		if m.cursorIdx < len(m.rows) {
@@ -516,13 +559,83 @@ func (m *Model) sendToPane(key string) tea.Cmd {
 	return paneRefreshCmd()
 }
 
-// refreshFocusedPane re-captures only the focused row's pane content.
-func (m *Model) refreshFocusedPane() {
-	if m.cursorIdx >= len(m.rows) {
+// selectedRows returns the marked tiles in display order, or nil when nothing
+// is marked.
+func (m *Model) selectedRows() []Row {
+	if len(m.selected) == 0 {
+		return nil
+	}
+	var out []Row
+	for _, row := range m.rows {
+		if m.selected[row.Worktree.Path] {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// insertTargets returns the rows insert mode sends to: every marked tile when
+// there is a selection, otherwise just the focused tile. The expanded view
+// always acts on the single tile it is showing.
+func (m *Model) insertTargets() []Row {
+	if !m.expanded {
+		if rows := m.selectedRows(); len(rows) > 0 {
+			return rows
+		}
+	}
+	if m.cursorIdx < len(m.rows) {
+		return []Row{m.rows[m.cursorIdx]}
+	}
+	return nil
+}
+
+func (m *Model) clearSelection() {
+	if len(m.selected) == 0 {
 		return
 	}
-	if target := m.rows[m.cursorIdx].PaneTarget; target != "" {
-		m.rows[m.cursorIdx].PaneContent = tmux.CapturePaneContent(target)
+	m.selected = make(map[string]bool)
+	m.message = "Selection cleared"
+}
+
+func (m *Model) selectionMessage() string {
+	switch n := len(m.selected); n {
+	case 0:
+		return "Selection cleared"
+	case 1:
+		return "1 tile selected"
+	default:
+		return fmt.Sprintf("%d tiles selected", n)
+	}
+}
+
+// pruneSelection drops marks for worktrees that are no longer displayed, so a
+// scope change or a removed worktree can't leave a phantom selection behind.
+func (m *Model) pruneSelection() {
+	if len(m.selected) == 0 {
+		return
+	}
+	visible := make(map[string]bool, len(m.rows))
+	for _, row := range m.rows {
+		visible[row.Worktree.Path] = true
+	}
+	for path := range m.selected {
+		if !visible[path] {
+			delete(m.selected, path)
+		}
+	}
+}
+
+// refreshSentPanes re-captures the panes a send could have touched: the
+// focused row's plus every marked row's, so a fan-out send updates each tile
+// rather than only the one under the cursor.
+func (m *Model) refreshSentPanes() {
+	for i, row := range m.rows {
+		if row.PaneTarget == "" {
+			continue
+		}
+		if i == m.cursorIdx || m.selected[row.Worktree.Path] {
+			m.rows[i].PaneContent = tmux.CapturePaneContent(row.PaneTarget)
+		}
 	}
 }
 
@@ -601,6 +714,7 @@ func (m *Model) refreshAll() tea.Cmd {
 	m.register.Reconcile(currentPaths)
 	_ = m.register.Save()
 	m.rows = rows
+	m.pruneSelection()
 	if m.cursorIdx >= len(m.rows) {
 		m.cursorIdx = max(0, len(m.rows)-1)
 	}
@@ -702,6 +816,7 @@ func (m *Model) removeRowByPath(path string) {
 	for i := range m.rows {
 		if m.rows[i].Worktree.Path == path {
 			m.rows = append(m.rows[:i], m.rows[i+1:]...)
+			delete(m.selected, path)
 			if m.cursorIdx >= len(m.rows) {
 				m.cursorIdx = max(0, len(m.rows)-1)
 			}

@@ -73,6 +73,11 @@ type Model struct {
 	scope           ViewScope       // which worktrees to display (all vs. root-only)
 	create          createState     // interactive create-worktree flow (c)
 
+	// selected marks tiles (by worktree path) for multi-tile actions such as
+	// sending input to several panes at once. Keyed by path so marks survive a
+	// refresh that reorders rows.
+	selected map[string]bool
+
 	// Layout
 	helpLines   []string // footer help, wrapped to the terminal width
 	visibleCols int      // grid columns
@@ -112,6 +117,7 @@ func NewModel(repoRoot, focusPath string) Model {
 		history:   loadHistory(histFile),
 		histSel:   -1,
 		histFile:  histFile,
+		selected:  make(map[string]bool),
 	}
 }
 

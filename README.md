@@ -60,17 +60,28 @@ make dashboard
 
 | Key | Action |
 |---|---|
-| `j` / `↓` | Move cursor down |
-| `k` / `↑` | Move cursor up |
+| `←` / `→` / `↑` / `↓` | Move cursor between tiles |
+| `Space` | Toggle selection of the focused tile |
+| `a` | Select all tiles / clear the selection |
+| `Esc` | Clear the selection |
+| `i` | Insert text, sent to every selected tile (or the focused one) |
+| `j` / `k` | Send Down / Up to the focused pane |
+| `e` / `t` | Send Enter / Tab+Enter to the focused pane |
+| `h` / `l` | Expand / collapse the focused tile |
 | `Enter` | Jump to worktree's tmux window |
 | `c` | Create a new worktree |
 | `C` | Create a new worktree in watch mode (no agent, watches git status) |
 | `n` / `N` | Open a tmux window for this worktree / for every worktree missing one |
 | `o` | Open PR in browser |
+| `I` | Open the branch's issue in browser |
 | `g` | Show detailed git status |
 | `d` | Delete worktree (with confirmation) |
+| `s` | Cycle scope (all / root / submodules) |
 | `r` | Refresh all data |
 | `q` / `Ctrl+C` | Quit |
+
+Selection is remembered per worktree, so it survives refreshes and cursor
+movement; tiles that leave the current scope drop out of it.
 
 ## Creating worktrees
 

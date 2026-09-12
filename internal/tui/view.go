@@ -28,6 +28,9 @@ var (
 	borderSelected   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("4")).Background(lipgloss.Color("#2b2a1a")) // blue border + gentle yellow bg
 	borderUnselected = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8"))                                       // dim gray
 	borderExpanded   = lipgloss.NewStyle().Border(lipgloss.DoubleBorder()).BorderForeground(lipgloss.Color("4")).Background(lipgloss.Color("#2b2a1a"))
+	borderMarked     = lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(lipgloss.Color("5")) // magenta: marked for multi-tile actions
+
+	styleMark = lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Bold(true)
 
 	// repoPalette holds subtle, distinct colors used to tint submodule tiles so
 	// worktrees from different submodules can be told apart at a glance. All
@@ -64,6 +67,9 @@ func (m *Model) helpItems() []string {
 	}
 	return []string{
 		nav,
+		"space: select",
+		"a: select all/none",
+		"esc: clear selection",
 		"j/k: pane down/up",
 		"i: insert text",
 		"h: expand",
@@ -194,7 +200,11 @@ func (m *Model) View() string {
 func (m *Model) renderNormalView() string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("\n  Worktree Dashboard  %s\n", styleDim.Render("· scope: "+m.scope.String())))
+	head := "· scope: " + m.scope.String()
+	if n := len(m.selected); n > 0 {
+		head += fmt.Sprintf(" · %d selected", n)
+	}
+	b.WriteString(fmt.Sprintf("\n  Worktree Dashboard  %s\n", styleDim.Render(head)))
 
 	if len(m.rows) == 0 {
 		b.WriteString(m.renderEmptyState())
@@ -272,7 +282,7 @@ func (m *Model) renderExpandedView() string {
 		expH = minTileBodyH + 5
 	}
 
-	tile := m.renderTileAt(row, expW, expH, borderExpanded)
+	tile := m.renderTileAt(row, expW, expH, borderExpanded, m.selected[row.Worktree.Path])
 
 	// Help lines below the tile; insert mode swaps them for the text input.
 	help := strings.TrimRight(renderHelp(m.helpLines), "\n")
@@ -323,7 +333,11 @@ func (m *Model) renderInsertFooter() string {
 	}
 
 	b.WriteString("  " + m.input.View() + "\n")
-	b.WriteString("\n  enter: send to pane  ↑/↓: history  esc: cancel\n")
+	dest := "pane"
+	if n := len(m.insertTargets()); n > 1 {
+		dest = fmt.Sprintf("%d panes", n)
+	}
+	b.WriteString(fmt.Sprintf("\n  enter: send to %s  ↑/↓: history  esc: cancel\n", dest))
 	return b.String()
 }
 
@@ -429,30 +443,38 @@ func (m *Model) ensureCursorVisible() {
 	}
 }
 
-func (m *Model) renderTile(row Row, selected bool) string {
+func (m *Model) renderTile(row Row, focused bool) string {
+	marked := m.selected[row.Worktree.Path]
 	var style lipgloss.Style
-	if c, ok := repoColor(row.Worktree.Repo); selected {
+	switch c, ok := repoColor(row.Worktree.Repo); {
+	case focused:
 		style = borderSelected
-	} else if ok {
+	case marked:
+		// A marked tile keeps a thick magenta border so the selection stays
+		// visible once the cursor moves on.
+		style = borderMarked
+	case ok:
 		// Tint the border with the submodule's color when not selected.
 		style = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(c)
-	} else {
+	default:
 		style = borderUnselected
 	}
-	return m.renderTileAt(row, m.tileW, m.tileH, style)
+	return m.renderTileAt(row, m.tileW, m.tileH, style, marked)
 }
 
-func (m *Model) renderTileAt(row Row, tileW, tileH int, style lipgloss.Style) string {
+func (m *Model) renderTileAt(row Row, tileW, tileH int, style lipgloss.Style, marked bool) string {
 	// Inner width = tile width - border (2 chars: 1 left + 1 right)
 	innerW := tileW - 4
 	if innerW < 10 {
 		innerW = 10
 	}
 
-	// Header line: bold branch name
-	branch := truncate(row.Worktree.Branch, innerW)
+	// Header line: bold branch name, prefixed with a check when marked.
 	branchStyle := lipgloss.NewStyle().Bold(true)
-	header := branchStyle.Render(branch)
+	header := branchStyle.Render(truncate(row.Worktree.Branch, innerW))
+	if marked {
+		header = styleMark.Render("✓ ") + branchStyle.Render(truncate(row.Worktree.Branch, innerW-2))
+	}
 
 	// Info line: submodule | agent | git status | PR#
 	var infoParts []string
