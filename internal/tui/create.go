@@ -3,11 +3,13 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/garber-squared/git-arborist/internal/activity"
 	"github.com/garber-squared/git-arborist/internal/port"
 	"github.com/garber-squared/git-arborist/internal/pr"
 	"github.com/garber-squared/git-arborist/internal/tmux"
@@ -450,6 +452,10 @@ func (m *Model) applyCreated(msg worktreeCreatedMsg) tea.Cmd {
 	}
 
 	m.expanded = false
+	// Creating a worktree wrote its files, so it counts as activity: without
+	// this the new tile would be hidden the moment it appears whenever the
+	// active-only filter is on.
+	m.activity.Record(msg.wt.Path, activity.KindFile, time.Now())
 	cmd := m.refreshAll()
 	found := false
 	for i, row := range m.rows {
@@ -465,9 +471,20 @@ func (m *Model) applyCreated(msg worktreeCreatedMsg) tea.Cmd {
 		m.message += " · " + strings.Join(msg.notes, " · ")
 	}
 	if !found {
-		// The worktree exists but the current scope filters its tile out; say
-		// so rather than leaving the user hunting for it.
-		m.message += fmt.Sprintf(" · hidden by scope '%s' (press s)", m.scope)
+		// The worktree exists but a filter keeps its tile off screen; say which
+		// one rather than leaving the user hunting for it.
+		inScope := false
+		for _, row := range m.allRows {
+			if row.Worktree.Path == msg.wt.Path {
+				inScope = true
+				break
+			}
+		}
+		if inScope {
+			m.message += " · hidden by the active-only filter (press f)"
+		} else {
+			m.message += fmt.Sprintf(" · hidden by scope '%s' (press s)", m.scope)
+		}
 	}
 	return cmd
 }

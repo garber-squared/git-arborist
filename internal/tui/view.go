@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/garber-squared/git-arborist/internal/activity"
 	"github.com/garber-squared/git-arborist/internal/agent"
 	"github.com/garber-squared/git-arborist/internal/register"
 )
@@ -31,6 +32,12 @@ var (
 	borderMarked     = lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(lipgloss.Color("5")) // magenta: marked for multi-tile actions
 
 	styleMark = lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Bold(true)
+
+	// colorActivity marks a worktree that just changed on disk. Bright cyan is
+	// the one signal colour left: blue is selection, magenta a mark, and
+	// green/red/yellow are agent states.
+	colorActivity = lipgloss.Color("14")
+	styleActivity = lipgloss.NewStyle().Foreground(colorActivity).Bold(true)
 
 	// repoPalette holds subtle, distinct colors used to tint submodule tiles so
 	// worktrees from different submodules can be told apart at a glance. All
@@ -82,6 +89,7 @@ func (m *Model) helpItems() []string {
 		"o: open PR",
 		"I: open issue",
 		"g: git status",
+		"f: active only",
 		"d: delete (D: force)",
 		"s: scope (all/root/submodules)",
 		"r: refresh",
@@ -201,6 +209,9 @@ func (m *Model) renderNormalView() string {
 	var b strings.Builder
 
 	head := "· scope: " + m.scope.String()
+	if m.activeOnly {
+		head += fmt.Sprintf(" · active only (%d of %d)", len(m.rows), len(m.allRows))
+	}
 	if n := len(m.selected); n > 0 {
 		head += fmt.Sprintf(" · %d selected", n)
 	}
@@ -214,6 +225,10 @@ func (m *Model) renderNormalView() string {
 
 	m.clampScroll()
 
+	// One clock reading for the whole frame, so every tile agrees on which
+	// worktrees are active.
+	now := time.Now()
+
 	// Render grid rows
 	var gridRows []string
 	for r := m.scrollRow; r < m.scrollRow+m.visibleRows && r < m.gridRows; r++ {
@@ -224,7 +239,7 @@ func (m *Model) renderNormalView() string {
 			endIdx = len(m.rows)
 		}
 		for i := startIdx; i < endIdx; i++ {
-			rowTiles = append(rowTiles, m.renderTile(m.rows[i], i == m.cursorIdx))
+			rowTiles = append(rowTiles, m.renderTile(m.rows[i], i == m.cursorIdx, now))
 		}
 		gridRows = append(gridRows, lipgloss.JoinHorizontal(lipgloss.Top, rowTiles...))
 	}
@@ -282,7 +297,12 @@ func (m *Model) renderExpandedView() string {
 		expH = minTileBodyH + 5
 	}
 
-	tile := m.renderTileAt(row, expW, expH, borderExpanded, m.selected[row.Worktree.Path])
+	now := time.Now()
+	style := borderExpanded
+	if _, active := m.recentActivity(row, now); active && m.flashOn {
+		style = style.BorderForeground(colorActivity)
+	}
+	tile := m.renderTileAt(row, expW, expH, style, m.selected[row.Worktree.Path], now)
 
 	// Help lines below the tile; insert mode swaps them for the text input.
 	help := strings.TrimRight(renderHelp(m.helpLines), "\n")
@@ -443,7 +463,7 @@ func (m *Model) ensureCursorVisible() {
 	}
 }
 
-func (m *Model) renderTile(row Row, focused bool) string {
+func (m *Model) renderTile(row Row, focused bool, now time.Time) string {
 	marked := m.selected[row.Worktree.Path]
 	var style lipgloss.Style
 	switch c, ok := repoColor(row.Worktree.Repo); {
@@ -459,10 +479,18 @@ func (m *Model) renderTile(row Row, focused bool) string {
 	default:
 		style = borderUnselected
 	}
-	return m.renderTileAt(row, m.tileW, m.tileH, style, marked)
+
+	// A worktree that changed within the activity window flashes: only the
+	// border colour alternates, so the border style still says whether the tile
+	// is focused or marked, and the grid never shifts.
+	if _, active := m.recentActivity(row, now); active && m.flashOn {
+		style = style.BorderForeground(colorActivity)
+	}
+
+	return m.renderTileAt(row, m.tileW, m.tileH, style, marked, now)
 }
 
-func (m *Model) renderTileAt(row Row, tileW, tileH int, style lipgloss.Style, marked bool) string {
+func (m *Model) renderTileAt(row Row, tileW, tileH int, style lipgloss.Style, marked bool, now time.Time) string {
 	// Inner width = tile width - border (2 chars: 1 left + 1 right)
 	innerW := tileW - 4
 	if innerW < 10 {
@@ -483,6 +511,13 @@ func (m *Model) renderTileAt(row Row, tileW, tileH int, style lipgloss.Style, ma
 	}
 	if row.ActiveAgent != "" {
 		infoParts = append(infoParts, styleAgent(row.ActiveAgent, row.ActiveAgent, row.AgentActivity))
+	} else if row.Command != "" {
+		// No agent, but something is running in the pane: a test run, a build.
+		infoParts = append(infoParts, styleRunning.Render(row.Command))
+	}
+	if ev, ok := m.recentActivity(row, now); ok {
+		// The flashing border says something happened; this says what.
+		infoParts = append(infoParts, styleActivity.Render("⚡"+ev.Kind.Label()))
 	}
 	infoParts = append(infoParts, row.GitStatus.String())
 	if row.PR != nil {
@@ -491,7 +526,9 @@ func (m *Model) renderTileAt(row Row, tileW, tileH int, style lipgloss.Style, ma
 	if row.Port != 0 {
 		infoParts = append(infoParts, styleDim.Render(fmt.Sprintf(":%d", row.Port)))
 	}
-	infoLine := strings.Join(infoParts, " │ ")
+	// Truncated, not wrapped: an info line one column too long would wrap and
+	// make the tile taller than every other tile in its row.
+	infoLine := truncateToWidth(strings.Join(infoParts, " │ "), innerW)
 
 	// Separator
 	sep := styleDim.Render(strings.Repeat("─", innerW))
@@ -585,6 +622,14 @@ func styleAgent(display, name string, activity agent.Activity) string {
 
 func (m *Model) renderEmptyState() string {
 	var b strings.Builder
+
+	// Worktrees exist, they are just all quiet: say so, rather than implying
+	// there is nothing to work on.
+	if m.activeOnly && len(m.allRows) > 0 {
+		b.WriteString(fmt.Sprintf("\n  No worktree has been active in the last %s.\n", activity.Linger))
+		b.WriteString("\n  " + styleDim.Render(fmt.Sprintf("%d hidden · press f to show all", len(m.allRows))) + "\n")
+		return b.String()
+	}
 
 	closed := m.register.RecentlyClosed()
 	if len(closed) == 0 {

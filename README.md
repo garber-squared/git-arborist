@@ -75,6 +75,7 @@ make dashboard
 | `o` | Open PR in browser |
 | `I` | Open the branch's issue in browser |
 | `g` | Show detailed git status |
+| `f` | Show only worktrees that are active right now |
 | `d` | Delete worktree (with confirmation) |
 | `s` | Cycle scope (all / root / submodules) |
 | `r` | Refresh all data |
@@ -82,6 +83,41 @@ make dashboard
 
 Selection is remembered per worktree, so it survives refreshes and cursor
 movement; tiles that leave the current scope drop out of it.
+
+## Activity
+
+A worktree that changes on disk flashes its border in cyan for five seconds, and
+for those five seconds its tile says what happened: `⚡file`, `⚡add`, `⚡commit`
+or `⚡push`. The signal comes from the filesystem watcher, so it is immediate
+rather than polled.
+
+What counts as activity:
+
+| Signal | How it is detected |
+|---|---|
+| a file written, created or removed | the working tree is watched, minus `.git`, dependency, build and log directories |
+| `git add` | the worktree's index was rewritten *and* its staged count went up |
+| `git commit` | the worktree's own HEAD reflog or `COMMIT_EDITMSG` was written |
+| `git push` | the remote-tracking ref for the worktree's branch moved |
+
+The index is only read as a `git add` when staging actually grew, because git
+rewrites the index on plain reads too — a bare `git status` refreshes the stat
+information it caches. Commits are attributed through per-worktree files, and
+pushes through the branch name, since remote-tracking refs are shared by every
+worktree in the repository.
+
+`f` hides every worktree that is not working: what stays on screen is the ones
+with a process running in their pane — an agent executing tools, a test run, a
+build — and the ones that have changed recently. An agent sitting at its prompt
+is not running, so a worktree waiting on you drops out. The header shows how
+many tiles are hidden, and `f` again brings them back.
+
+The filter uses a longer window than the flash: a tile flashes for five seconds
+but stays on screen for 45. Tiles that appeared and vanished on the same
+five-second timer would reflow the grid every time you paused typing, and a
+worktree you are in the middle of editing would keep dropping out from under the
+cursor. Both windows are one constant each, `Window` and `Linger` in
+`internal/activity`.
 
 ## Creating worktrees
 

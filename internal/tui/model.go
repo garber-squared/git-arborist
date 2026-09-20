@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/garber-squared/git-arborist/internal/activity"
 	"github.com/garber-squared/git-arborist/internal/agent"
 	"github.com/garber-squared/git-arborist/internal/gitstatus"
 	"github.com/garber-squared/git-arborist/internal/pr"
@@ -48,10 +49,22 @@ type Row struct {
 	PaneTarget    string // tmux target like "session:1.0"
 	PaneContent   string // captured pane text
 	Port          int    // dev port assigned to this worktree, 0 if none
+
+	// Command is the non-agent process running in the worktree's pane (a test
+	// run, a build), empty when there is none.
+	Command string
+	// Busy reports that work is happening in the pane: an agent executing
+	// tools, or any non-shell process.
+	Busy bool
 }
 
 // Model is the Bubble Tea model for the dashboard.
 type Model struct {
+	// allRows holds every worktree the current scope covers and is the one the
+	// refreshers write to. rows is what the grid draws: allRows after the
+	// active-only filter, so cursorIdx and the layout only ever see tiles that
+	// are on screen.
+	allRows    []Row
 	rows       []Row
 	cursorIdx  int
 	repoRoot   string
@@ -77,6 +90,14 @@ type Model struct {
 	// sending input to several panes at once. Keyed by path so marks survive a
 	// refresh that reorders rows.
 	selected map[string]bool
+
+	// activity records when each worktree last changed on disk, driving the
+	// flashing border and the active-only filter.
+	activity *activity.Tracker
+	// activeOnly hides worktrees with nothing running and no recent changes (f).
+	activeOnly bool
+	// flashOn is the current phase of the border flash on active tiles.
+	flashOn bool
 
 	// Layout
 	helpLines   []string // footer help, wrapped to the terminal width
@@ -108,6 +129,7 @@ func NewModel(repoRoot, focusPath string) Model {
 	ci.Prompt = "> "
 	histFile := filepath.Join(repoRoot, ".git", "arborist-history")
 	return Model{
+		activity:  activity.NewTracker(),
 		create:    createState{input: ci},
 		repoRoot:  repoRoot,
 		stateFile: filepath.Join(repoRoot, ".git", "arborist-state"),

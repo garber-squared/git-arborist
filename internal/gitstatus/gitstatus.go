@@ -46,8 +46,11 @@ func (s Status) String() string {
 func Get(worktreePath string) Status {
 	var s Status
 
-	// porcelain status
-	cmd := exec.Command("git", "-C", worktreePath, "status", "--porcelain")
+	// porcelain status. --no-optional-locks keeps this read from rewriting the
+	// index to refresh cached stat information: that write is indistinguishable
+	// from a git add to a filesystem watcher, and the dashboard calls this on
+	// every refresh and on every change it is told about.
+	cmd := exec.Command("git", "--no-optional-locks", "-C", worktreePath, "status", "--porcelain")
 	out, err := cmd.Output()
 	if err != nil {
 		return s

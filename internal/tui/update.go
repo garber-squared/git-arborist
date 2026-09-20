@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/garber-squared/git-arborist/internal/activity"
 	"github.com/garber-squared/git-arborist/internal/agent"
 	"github.com/garber-squared/git-arborist/internal/docker"
 	"github.com/garber-squared/git-arborist/internal/gitstatus"
@@ -51,6 +52,20 @@ func agentTickCmd() tea.Cmd {
 	})
 }
 
+// flashTickMsg drives the border flash on active tiles and re-evaluates the
+// active-only filter, so a worktree appears or disappears within one tick of
+// starting or stopping work.
+type flashTickMsg struct{}
+
+// flashInterval is the flash's half-period: the border alternates on every tick.
+const flashInterval = 500 * time.Millisecond
+
+func flashTickCmd() tea.Cmd {
+	return tea.Tick(flashInterval, func(time.Time) tea.Msg {
+		return flashTickMsg{}
+	})
+}
+
 func paneTickCmd() tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 		return paneTickMsg{}
@@ -76,6 +91,7 @@ func (m *Model) Init() tea.Cmd {
 		func() tea.Msg { return refreshMsg{} },
 		agentTickCmd(),
 		paneTickCmd(),
+		flashTickCmd(),
 	)
 }
 
@@ -106,6 +122,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshPaneContent()
 		return m, paneTickCmd()
 
+	case flashTickMsg:
+		m.flashOn = !m.flashOn
+		// Activity expires with time rather than with an event, so the filter
+		// has to be re-evaluated on a tick.
+		m.applyFilter()
+		return m, flashTickCmd()
+
 	case paneRefreshMsg:
 		m.refreshSentPanes()
 
@@ -116,7 +139,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applyCreated(msg)
 
 	case watcher.FileChangedMsg:
-		m.refreshRow(msg.WorktreePath, msg.Kind)
+		m.recordChange(msg)
 	}
 
 	return m, nil
@@ -240,7 +263,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.sendToPane("Down")
 		case "k":
 			return m, m.sendToPane("Up")
-		case "left", "right", "up", "down", "h", "d", "r", "g", "s", "n", "N", " ", "a":
+		case "left", "right", "up", "down", "h", "d", "r", "g", "s", "n", "N", " ", "a", "f":
 			return m, nil
 		case "q", "ctrl+c":
 			m.expanded = false
@@ -313,6 +336,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.String() == "r":
 		m.message = ""
 		return m, m.refreshAll()
+
+	case msg.String() == "f":
+		m.activeOnly = !m.activeOnly
+		m.applyFilter()
+		if m.activeOnly {
+			m.message = fmt.Sprintf("Active only: showing %d of %d worktrees", len(m.rows), len(m.allRows))
+		} else {
+			m.message = "Showing all worktrees"
+		}
 
 	case msg.String() == "s":
 		switch m.scope {
@@ -608,14 +640,16 @@ func (m *Model) selectionMessage() string {
 	}
 }
 
-// pruneSelection drops marks for worktrees that are no longer displayed, so a
-// scope change or a removed worktree can't leave a phantom selection behind.
+// pruneSelection drops marks for worktrees that no longer exist, so a scope
+// change or a removed worktree can't leave a phantom selection behind. It reads
+// allRows rather than the displayed rows: a tile hidden by the active-only
+// filter is still there, and hiding it must not silently unmark it.
 func (m *Model) pruneSelection() {
 	if len(m.selected) == 0 {
 		return
 	}
-	visible := make(map[string]bool, len(m.rows))
-	for _, row := range m.rows {
+	visible := make(map[string]bool, len(m.allRows))
+	for _, row := range m.allRows {
 		visible[row.Worktree.Path] = true
 	}
 	for path := range m.selected {
@@ -629,14 +663,19 @@ func (m *Model) pruneSelection() {
 // focused row's plus every marked row's, so a fan-out send updates each tile
 // rather than only the one under the cursor.
 func (m *Model) refreshSentPanes() {
+	sent := make(map[string]bool, len(m.selected)+1)
 	for i, row := range m.rows {
-		if row.PaneTarget == "" {
-			continue
-		}
 		if i == m.cursorIdx || m.selected[row.Worktree.Path] {
-			m.rows[i].PaneContent = tmux.CapturePaneContent(row.PaneTarget)
+			sent[row.Worktree.Path] = true
 		}
 	}
+	for i, row := range m.allRows {
+		if row.PaneTarget == "" || !sent[row.Worktree.Path] {
+			continue
+		}
+		m.allRows[i].PaneContent = tmux.CapturePaneContent(row.PaneTarget)
+	}
+	m.applyFilter()
 }
 
 // refreshAll rediscovers worktrees and repopulates the dashboard. Fast, local
@@ -653,8 +692,8 @@ func (m *Model) refreshAll() tea.Cmd {
 
 	// Carry over already-known PR data so a refresh doesn't blank the PR
 	// badges until the background lookups return.
-	prevPR := make(map[string]*pr.PullRequest, len(m.rows))
-	for _, row := range m.rows {
+	prevPR := make(map[string]*pr.PullRequest, len(m.allRows))
+	for _, row := range m.allRows {
 		if row.PR != nil {
 			prevPR[row.Worktree.Path] = row.PR
 		}
@@ -713,11 +752,9 @@ func (m *Model) refreshAll() tea.Cmd {
 	}
 	m.register.Reconcile(currentPaths)
 	_ = m.register.Save()
-	m.rows = rows
+	m.allRows = rows
 	m.pruneSelection()
-	if m.cursorIdx >= len(m.rows) {
-		m.cursorIdx = max(0, len(m.rows)-1)
-	}
+	m.applyFilter()
 
 	if !m.restored {
 		m.restored = true
@@ -750,7 +787,7 @@ func (m *Model) refreshAll() tea.Cmd {
 
 	m.refreshAgents()
 	m.refreshPaneTargets()
-	for _, row := range m.rows {
+	for _, row := range m.allRows {
 		if row.PaneTarget == "" {
 			_ = tmux.NewWindow(row.Worktree.Path, row.Worktree.Branch)
 		}
@@ -758,7 +795,9 @@ func (m *Model) refreshAll() tea.Cmd {
 	m.refreshPaneTargets()
 	m.refreshPaneContent()
 
-	// Set up file watchers
+	// Set up file watchers. Every worktree in scope is watched, including the
+	// ones the active-only filter is hiding: a hidden worktree has to be able to
+	// announce that work started in it, or it could never come back on screen.
 	if m.watcher != nil {
 		m.watcher.Close()
 	}
@@ -766,8 +805,11 @@ func (m *Model) refreshAll() tea.Cmd {
 		w, err := watcher.New(m.sendFn)
 		if err == nil {
 			m.watcher = w
-			for _, row := range m.rows {
-				w.WatchWorktree(row.Worktree.Path)
+			for _, row := range m.allRows {
+				w.Watch(watcher.Target{
+					Path:   row.Worktree.Path,
+					Branch: row.Worktree.Branch,
+				})
 			}
 		}
 	}
@@ -782,9 +824,9 @@ func (m *Model) refreshAll() tea.Cmd {
 func (m *Model) applyPR(wt worktree.Worktree, p *pr.PullRequest) {
 	if p != nil && p.State == "MERGED" {
 		var st *agent.State
-		for i := range m.rows {
-			if m.rows[i].Worktree.Path == wt.Path {
-				st = m.rows[i].AgentState
+		for i := range m.allRows {
+			if m.allRows[i].Worktree.Path == wt.Path {
+				st = m.allRows[i].AgentState
 				break
 			}
 		}
@@ -802,9 +844,10 @@ func (m *Model) applyPR(wt worktree.Worktree, p *pr.PullRequest) {
 		m.removeRowByPath(wt.Path)
 		return
 	}
-	for i := range m.rows {
-		if m.rows[i].Worktree.Path == wt.Path {
-			m.rows[i].PR = p
+	for i := range m.allRows {
+		if m.allRows[i].Worktree.Path == wt.Path {
+			m.allRows[i].PR = p
+			m.applyFilter()
 			return
 		}
 	}
@@ -813,14 +856,12 @@ func (m *Model) applyPR(wt worktree.Worktree, p *pr.PullRequest) {
 // removeRowByPath drops the tile for the given worktree path and keeps the
 // cursor within bounds.
 func (m *Model) removeRowByPath(path string) {
-	for i := range m.rows {
-		if m.rows[i].Worktree.Path == path {
-			m.rows = append(m.rows[:i], m.rows[i+1:]...)
+	for i := range m.allRows {
+		if m.allRows[i].Worktree.Path == path {
+			m.allRows = append(m.allRows[:i], m.allRows[i+1:]...)
 			delete(m.selected, path)
-			if m.cursorIdx >= len(m.rows) {
-				m.cursorIdx = max(0, len(m.rows)-1)
-			}
-			m.ensureCursorVisible()
+			m.activity.Forget(path)
+			m.applyFilter()
 			return
 		}
 	}
@@ -828,19 +869,30 @@ func (m *Model) removeRowByPath(path string) {
 
 func (m *Model) refreshAgents() {
 	detected := agent.DetectAll()
-	for i, row := range m.rows {
-		if info, ok := detected[row.Worktree.Path]; ok {
-			m.rows[i].ActiveAgent = info.Name
-			m.rows[i].AgentActivity = info.Activity
-		} else if row.AgentState != nil && row.AgentState.Agent != "" {
-			m.rows[i].ActiveAgent = row.AgentState.Agent
-			m.rows[i].AgentActivity = agent.ActivityIdle
-		} else {
-			m.rows[i].ActiveAgent = ""
-			m.rows[i].AgentActivity = agent.ActivityIdle
+	for i, row := range m.allRows {
+		info, found := detected[row.Worktree.Path]
+		switch {
+		case found && info.Name != "":
+			m.allRows[i].ActiveAgent = info.Name
+			m.allRows[i].AgentActivity = info.Activity
+		case row.AgentState != nil && row.AgentState.Agent != "":
+			m.allRows[i].ActiveAgent = row.AgentState.Agent
+			m.allRows[i].AgentActivity = agent.ActivityIdle
+		default:
+			m.allRows[i].ActiveAgent = ""
+			m.allRows[i].AgentActivity = agent.ActivityIdle
 		}
+		// A non-agent process is reported separately: the tile shows what is
+		// running, and the active-only filter keeps the worktree on screen for
+		// as long as it runs.
+		m.allRows[i].Command = ""
+		if found && info.Name == "" {
+			m.allRows[i].Command = info.Command
+		}
+		m.allRows[i].Busy = found && info.Busy()
 	}
 	m.refreshPaneTargets()
+	m.applyFilter()
 }
 
 func (m *Model) refreshPaneTargets() {
@@ -855,43 +907,88 @@ func (m *Model) refreshPaneTargets() {
 		pathToTarget[p.Path] = p.Target
 	}
 
-	for i, row := range m.rows {
+	for i, row := range m.allRows {
 		// Prefer agent state TMUX ref if available
 		if row.AgentState != nil && row.AgentState.TMUX.Session != "" {
-			m.rows[i].PaneTarget = fmt.Sprintf("%s:%d.%d",
+			m.allRows[i].PaneTarget = fmt.Sprintf("%s:%d.%d",
 				row.AgentState.TMUX.Session,
 				row.AgentState.TMUX.Window,
 				row.AgentState.TMUX.Pane)
 		} else if target, ok := pathToTarget[row.Worktree.Path]; ok {
-			m.rows[i].PaneTarget = target
+			m.allRows[i].PaneTarget = target
 		} else {
-			m.rows[i].PaneTarget = ""
+			m.allRows[i].PaneTarget = ""
 		}
 	}
 }
 
 func (m *Model) refreshPaneContent() {
-	for i, row := range m.rows {
+	for i, row := range m.allRows {
 		if row.PaneTarget != "" {
-			m.rows[i].PaneContent = tmux.CapturePaneContent(row.PaneTarget)
+			m.allRows[i].PaneContent = tmux.CapturePaneContent(row.PaneTarget)
 		} else {
-			m.rows[i].PaneContent = ""
+			m.allRows[i].PaneContent = ""
 		}
 	}
+	m.applyFilter()
 }
 
-func (m *Model) refreshRow(wtPath, kind string) {
-	for i, row := range m.rows {
-		if row.Worktree.Path == wtPath {
-			switch kind {
-			case "agent":
-				m.rows[i].AgentState = agent.ReadState(wtPath)
-			case "git":
-				m.rows[i].GitStatus = gitstatus.Get(wtPath)
-			default:
-				m.rows[i].GitStatus = gitstatus.Get(wtPath)
-				m.rows[i].AgentState = agent.ReadState(wtPath)
+// recordChange folds a watcher event into the model: it refreshes the affected
+// worktree's data and notes the activity that drives the flashing border and the
+// active-only filter.
+func (m *Model) recordChange(msg watcher.FileChangedMsg) {
+	at := msg.At
+	if at.IsZero() {
+		at = time.Now()
+	}
+
+	switch msg.Kind {
+	case watcher.KindAgent:
+		m.refreshAgentState(msg.WorktreePath)
+
+	case watcher.KindFile:
+		m.refreshGitStatus(msg.WorktreePath)
+		m.activity.Record(msg.WorktreePath, activity.KindFile, at)
+
+	case watcher.KindGit:
+		staged := m.refreshGitStatus(msg.WorktreePath)
+		switch msg.GitOp {
+		case watcher.GitOpCommit:
+			m.activity.Record(msg.WorktreePath, activity.KindCommit, at)
+		case watcher.GitOpPush:
+			m.activity.Record(msg.WorktreePath, activity.KindPush, at)
+		case watcher.GitOpIndex:
+			// The index is rewritten by reads as well as by writes, so only a
+			// gain in staged changes is reported as a git add. git reset and the
+			// index refresh a bare `git status` performs are not activity.
+			if staged > 0 {
+				m.activity.Record(msg.WorktreePath, activity.KindStage, at)
 			}
+		}
+	}
+
+	m.applyFilter()
+}
+
+// refreshGitStatus recomputes a worktree's git status and returns by how much its
+// staged count moved, which is how a git add is told apart from the index
+// rewrites that ordinary reads cause.
+func (m *Model) refreshGitStatus(wtPath string) int {
+	for i, row := range m.allRows {
+		if row.Worktree.Path != wtPath {
+			continue
+		}
+		before := row.GitStatus.Staged
+		m.allRows[i].GitStatus = gitstatus.Get(wtPath)
+		return m.allRows[i].GitStatus.Staged - before
+	}
+	return 0
+}
+
+func (m *Model) refreshAgentState(wtPath string) {
+	for i, row := range m.allRows {
+		if row.Worktree.Path == wtPath {
+			m.allRows[i].AgentState = agent.ReadState(wtPath)
 			return
 		}
 	}
