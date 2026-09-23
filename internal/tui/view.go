@@ -58,120 +58,21 @@ func repoColor(repo string) (lipgloss.Color, bool) {
 	return repoPalette[sum%len(repoPalette)], true
 }
 
-// helpItems returns the dashboard's key hints as separate items so the footer
-// can wrap them to the terminal width instead of running off the edge.
-func (m *Model) helpItems() []string {
-	nav := "←/→: navigate"
-	if m.gridRows > 1 {
-		nav = "←↑↓→: navigate"
-	}
-	return []string{
-		nav,
-		"space: select",
-		"a: select all/none",
-		"esc: clear selection",
-		"j/k: pane down/up",
-		"i: insert text",
-		"h: expand",
-		"l: collapse",
-		"enter: tmux jump",
-		"c: new worktree",
-		"C: new worktree (watch)",
-		"n: new pane",
-		"N: new all panes",
-		"o: open PR",
-		"I: open issue",
-		"g: git status",
-		"d: delete (D: force)",
-		"s: scope (all/root/submodules)",
-		"r: refresh",
-		"q: quit",
-	}
-}
-
-func expandedHelpItems() []string {
-	return []string{
-		"l/esc: collapse",
-		"j/k: pane down/up",
-		"i: insert text",
-		"enter: tmux jump",
-		"c: new worktree",
-		"o: open PR",
-		"I: open issue",
-		"q: quit",
-	}
-}
-
-func emptyHelpItems() []string {
-	return []string{
-		"c: new worktree",
-		"C: new worktree (watch)",
-		"s: scope (all/root/submodules)",
-		"r: refresh",
-		"q: quit",
-	}
-}
-
-// wrapHelp packs hints into lines no wider than width, two spaces apart. A
-// hint is never split, so a line can still exceed width if one hint alone
-// does.
-func wrapHelp(items []string, width int) []string {
-	const sep = "  "
-	if width < 10 {
-		width = 10
-	}
-	var lines []string
-	line := ""
-	for _, item := range items {
-		switch {
-		case line == "":
-			line = item
-		case lipgloss.Width(line)+len(sep)+lipgloss.Width(item) <= width:
-			line += sep + item
-		default:
-			lines = append(lines, line)
-			line = item
-		}
-	}
-	if line != "" {
-		lines = append(lines, line)
-	}
-	return lines
-}
-
-// renderHelp renders the footer's help lines, indented like the rest of the
-// dashboard.
-func renderHelp(lines []string) string {
-	var b strings.Builder
-	for _, line := range lines {
-		b.WriteString("  " + line + "\n")
-	}
-	return b.String()
-}
-
-// helpWidth is how wide a help line may be: the terminal minus the two-space
-// indent on each side.
+// helpWidth is how wide a footer line may be: the terminal minus the
+// two-space indent on each side.
 func (m *Model) helpWidth() int {
 	return max(10, m.width-4)
 }
 
-// wrappedHelp is the help for whichever view is on screen, wrapped to width.
-func (m *Model) wrappedHelp() []string {
-	if m.expanded {
-		return wrapHelp(expandedHelpItems(), m.helpWidth())
-	}
-	return wrapHelp(m.helpItems(), m.helpWidth())
-}
-
-// footerH is how many rows the footer occupies: the blank spacer, the status
-// message, and however many lines the help wrapped to.
+// footerH is how many rows the footer occupies: the scroll indicator and the
+// status message.
 func (m *Model) footerH() int {
-	return 1 + m.messageH() + len(m.helpLines)
+	return 1 + m.messageH()
 }
 
 // messageH is how many rows the status message needs. The terminal wraps it,
 // and a message can be several lines to begin with (`g` shows a git status),
-// so a long one must not push the help off the bottom of the screen.
+// so a long one must not push the tiles off the screen.
 func (m *Model) messageH() int {
 	if m.message == "" {
 		return 1 // the row stays reserved so the layout doesn't jump
@@ -191,6 +92,12 @@ func (m *Model) View() string {
 	if m.create.active {
 		return m.renderCreateView()
 	}
+	if m.showKeys {
+		return m.renderKeysView()
+	}
+	if m.gitStatus != nil {
+		return m.renderGitStatusView()
+	}
 	if m.expanded && m.cursorIdx < len(m.rows) {
 		return m.renderExpandedView()
 	}
@@ -204,11 +111,10 @@ func (m *Model) renderNormalView() string {
 	if n := len(m.selected); n > 0 {
 		head += fmt.Sprintf(" · %d selected", n)
 	}
-	b.WriteString(fmt.Sprintf("\n  Worktree Dashboard  %s\n", styleDim.Render(head)))
+	b.WriteString("\n" + m.renderTitle("  Worktree Dashboard  "+styleDim.Render(head)) + "\n")
 
 	if len(m.rows) == 0 {
 		b.WriteString(m.renderEmptyState())
-		b.WriteString("\n" + renderHelp(m.helpLines))
 		return b.String()
 	}
 
@@ -263,9 +169,6 @@ func (m *Model) renderNormalView() string {
 		b.WriteString("  " + m.message + "\n")
 	}
 
-	// Help
-	b.WriteString("\n" + renderHelp(m.helpLines))
-
 	return b.String()
 }
 
@@ -284,13 +187,12 @@ func (m *Model) renderExpandedView() string {
 
 	tile := m.renderTileAt(row, expW, expH, borderExpanded, m.selected[row.Worktree.Path])
 
-	// Help lines below the tile; insert mode swaps them for the text input.
-	help := strings.TrimRight(renderHelp(m.helpLines), "\n")
+	// The keybinding CTA sits above the tile, left-aligned to it; insert mode
+	// adds the text input below.
+	content := lipgloss.PlaceHorizontal(lipgloss.Width(tile), lipgloss.Left, styleKeysCTA.Render(keysCTA)) + "\n" + tile
 	if m.inserting {
-		help = strings.TrimRight(m.renderInsertFooter(), "\n")
+		content += "\n" + strings.TrimRight(m.renderInsertFooter(), "\n")
 	}
-
-	content := tile + "\n" + help
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
@@ -347,7 +249,6 @@ func (m *Model) computeLayout() {
 		m.visibleCols = 0
 		m.gridRows = 0
 		m.visibleRows = 0
-		m.helpLines = wrapHelp(emptyHelpItems(), m.helpWidth())
 		return
 	}
 
@@ -380,10 +281,7 @@ func (m *Model) computeLayout() {
 	}
 	m.tileW = w / m.visibleCols
 
-	// The help footer wraps to as many lines as the width needs, and the tiles
-	// get the height that is left.
-	m.helpLines = m.wrappedHelp()
-
+	// The tiles get the height the header and footer leave.
 	available := m.height - dashHeaderH - m.footerH()
 	minAvailable := (minTileBodyH + 5) * m.visibleRows
 	if available < minAvailable {
