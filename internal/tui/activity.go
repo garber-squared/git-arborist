@@ -12,7 +12,15 @@ import (
 // window — a worktree you are working in should not drop out of sight during a
 // pause between keystrokes.
 func (m *Model) rowActive(row Row, now time.Time) bool {
-	if row.Busy {
+	// A worktree with an agent in its pane is never hidden, even when the agent
+	// is waiting rather than working: an agent holding a question is precisely
+	// the tile the user needs to be able to find.
+	if row.AgentPresent {
+		return true
+	}
+	// Work running in the pane — a test run, a build — counts while it runs.
+	// Something merely left running there does not.
+	if row.Working {
 		return true
 	}
 	_, ok := m.activity.Recent(row.Worktree.Path, now, activity.Linger)

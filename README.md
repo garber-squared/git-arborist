@@ -106,11 +106,21 @@ information it caches. Commits are attributed through per-worktree files, and
 pushes through the branch name, since remote-tracking refs are shared by every
 worktree in the repository.
 
-`f` hides every worktree that is not working: what stays on screen is the ones
-with a process running in their pane — an agent executing tools, a test run, a
-build — and the ones that have changed recently. An agent sitting at its prompt
-is not running, so a worktree waiting on you drops out. The header shows how
-many tiles are hidden, and `f` again brings them back.
+`f` hides every worktree that is not working. What stays on screen:
+
+- **worktrees with an agent in their pane** — claude or codex, whether it is
+  executing tools or waiting at its prompt. A session holding a question is the
+  tile you most need to find, so it is never hidden. A state file an agent left
+  behind does not count; the process has to actually be there.
+- **worktrees running work** — a test run, a build, a linter. Something merely
+  left running in the pane does not count: a `watch` loop, a log tail or an
+  editor would otherwise pin its tile on screen for ever, which is the one thing
+  the filter exists to prevent. The tile still shows what is running, dimmed
+  rather than highlighted, so you can see why it is not counted. The list of
+  commands that count as work is `workCommands` in `internal/agent`.
+- **worktrees that changed recently** — see the linger window below.
+
+The header shows how many tiles are hidden, and `f` again brings them back.
 
 The filter uses a longer window than the flash: a tile flashes for five seconds
 but stays on screen for 45. Tiles that appeared and vanished on the same

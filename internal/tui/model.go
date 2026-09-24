@@ -50,12 +50,16 @@ type Row struct {
 	PaneContent   string // captured pane text
 	Port          int    // dev port assigned to this worktree, 0 if none
 
-	// Command is the non-agent process running in the worktree's pane (a test
-	// run, a build), empty when there is none.
+	// Command is the non-agent process running in the worktree's pane, empty
+	// when there is none.
 	Command string
-	// Busy reports that work is happening in the pane: an agent executing
-	// tools, or any non-shell process.
-	Busy bool
+	// Working reports that Command is work (a test run, a build) rather than
+	// something left running in the pane (a `watch` loop, a log tail).
+	Working bool
+	// AgentPresent reports that an agent process is in the worktree's pane right
+	// now, whether it is executing tools or waiting at its prompt. It is not set
+	// by a leftover state file, only by a process that is actually there.
+	AgentPresent bool
 }
 
 // Model is the Bubble Tea model for the dashboard.

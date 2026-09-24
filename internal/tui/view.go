@@ -512,8 +512,14 @@ func (m *Model) renderTileAt(row Row, tileW, tileH int, style lipgloss.Style, ma
 	if row.ActiveAgent != "" {
 		infoParts = append(infoParts, styleAgent(row.ActiveAgent, row.ActiveAgent, row.AgentActivity))
 	} else if row.Command != "" {
-		// No agent, but something is running in the pane: a test run, a build.
-		infoParts = append(infoParts, styleRunning.Render(row.Command))
+		// No agent, but something is running in the pane. Work is highlighted
+		// like a running agent; anything else is dimmed, so the tile says why it
+		// is not counted as active.
+		style := styleDim
+		if row.Working {
+			style = styleRunning
+		}
+		infoParts = append(infoParts, style.Render(row.Command))
 	}
 	if ev, ok := m.recentActivity(row, now); ok {
 		// The flashing border says something happened; this says what.

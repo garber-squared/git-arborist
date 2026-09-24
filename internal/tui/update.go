@@ -871,6 +871,10 @@ func (m *Model) refreshAgents() {
 	detected := agent.DetectAll()
 	for i, row := range m.allRows {
 		info, found := detected[row.Worktree.Path]
+		// AgentPresent means a process is in the pane now. The AgentState branch
+		// below is a file an agent left behind, which says nothing about whether
+		// it is still there, so it must not keep a tile on screen.
+		m.allRows[i].AgentPresent = found && info.Name != ""
 		switch {
 		case found && info.Name != "":
 			m.allRows[i].ActiveAgent = info.Name
@@ -883,13 +887,14 @@ func (m *Model) refreshAgents() {
 			m.allRows[i].AgentActivity = agent.ActivityIdle
 		}
 		// A non-agent process is reported separately: the tile shows what is
-		// running, and the active-only filter keeps the worktree on screen for
-		// as long as it runs.
+		// running either way, and the filter keeps the worktree on screen only
+		// while that process is work.
 		m.allRows[i].Command = ""
+		m.allRows[i].Working = false
 		if found && info.Name == "" {
 			m.allRows[i].Command = info.Command
+			m.allRows[i].Working = info.Working
 		}
-		m.allRows[i].Busy = found && info.Busy()
 	}
 	m.refreshPaneTargets()
 	m.applyFilter()

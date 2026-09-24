@@ -23,18 +23,11 @@ type AgentInfo struct {
 	Name     string
 	Activity Activity
 	// Command is the pane's foreground command when that command is not a shell
-	// — a test run, a build, an editor. Empty for an idle shell prompt.
+	// — a test run, a build, a `watch` loop. Empty for an idle shell prompt.
 	Command string
-}
-
-// Busy reports whether the pane is doing work right now: an agent executing
-// tools, or any non-shell foreground process. An agent sitting at its prompt is
-// not busy, even though it holds the foreground.
-func (a AgentInfo) Busy() bool {
-	if a.Name != "" {
-		return a.Activity == ActivityRunning
-	}
-	return a.Command != ""
+	// Working reports that Command is work rather than something merely left
+	// running: a test run counts, a log tail does not.
+	Working bool
 }
 
 // shellCommands are the foreground commands that mean "nothing is running
@@ -45,6 +38,21 @@ var shellCommands = map[string]bool{
 	"login": true, "su": true,
 }
 
+// workCommands are the foreground processes that count as work in the worktree
+// they run in. The list is deliberately closed: treating every non-shell process
+// as work means a `watch` loop, a log tail or an editor left open in a corner
+// pins its worktree on screen for ever, which is what the active-only filter
+// exists to prevent. Work that is not on this list still shows up through the
+// files it writes.
+var workCommands = map[string]bool{
+	"rspec": true, "rake": true, "rubocop": true, "cucumber": true,
+	"jest": true, "vitest": true, "eslint": true, "tsc": true,
+	"webpack": true, "vite": true, "esbuild": true,
+	"pytest": true, "tox": true, "mypy": true, "ruff": true, "black": true,
+	"cargo": true, "make": true, "gradle": true, "mvn": true, "phpunit": true,
+	"cypress": true, "playwright": true, "gotestsum": true,
+}
+
 // genericInterpreters are process names worth looking past: they say how a tool
 // was started, not which tool it is.
 var genericInterpreters = map[string]bool{
@@ -53,11 +61,14 @@ var genericInterpreters = map[string]bool{
 }
 
 // runnerTokens are the tools worth naming when an interpreter is in the
-// foreground, longest-running suspects first. `bundle exec rspec` appears as
-// "ruby" in tmux; "rspec" is what the user actually started.
+// foreground. `bundle exec rspec` appears as "ruby" in tmux; "rspec" is what the
+// user actually started. Matching one of these is itself evidence of work, so a
+// dev server started through the same interpreter (`npm run dev`, which matches
+// nothing here) does not count.
 var runnerTokens = []string{
 	"rspec", "rubocop", "rake", "jest", "vitest", "pytest", "cypress",
-	"playwright", "webpack", "eslint", "tsc", "go test", "cargo",
+	"playwright", "webpack", "eslint", "tsc", "gotestsum",
+	"go test", "cargo test", "npm test", "yarn test", "pnpm test", "mix test",
 }
 
 // DetectAll inspects all tmux panes and returns a map from worktree path to what
@@ -85,38 +96,60 @@ func DetectAll() map[string]AgentInfo {
 		}
 		pid, paneCmd, panePath := parts[0], parts[1], parts[2]
 
+		var info AgentInfo
 		if name, agentPID := findAgentInTree(pid, 0); name != "" {
-			result[panePath] = AgentInfo{Name: name, Activity: classifyActivity(agentPID)}
+			info = AgentInfo{Name: name, Activity: classifyActivity(agentPID)}
+		} else if cmd, working := foregroundCommand(pid, paneCmd); cmd != "" {
+			info = AgentInfo{Command: cmd, Working: working, Activity: ActivityRunning}
+		} else {
 			continue
 		}
-		if cmd := foregroundCommand(pid, paneCmd); cmd != "" {
-			result[panePath] = AgentInfo{Command: cmd, Activity: ActivityRunning}
+
+		// Several panes can share a worktree. Keep the most telling one, so the
+		// tile does not flicker between them as the map is rebuilt: an agent
+		// outranks work, and work outranks something merely left running.
+		if prev, ok := result[panePath]; ok && rank(prev) >= rank(info) {
+			continue
 		}
+		result[panePath] = info
 	}
 
 	return result
 }
 
-// foregroundCommand names the non-agent process running in a pane, or "" when
-// the pane is idle at a shell prompt.
-func foregroundCommand(panePID, paneCmd string) string {
+// rank orders panes by how much their contents matter to the tile.
+func rank(a AgentInfo) int {
+	switch {
+	case a.Name != "":
+		return 3
+	case a.Working:
+		return 2
+	case a.Command != "":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// foregroundCommand names the non-agent process running in a pane and reports
+// whether it is work. It returns "" when the pane is idle at a shell prompt.
+func foregroundCommand(panePID, paneCmd string) (name string, working bool) {
 	if paneCmd == "" || shellCommands[paneCmd] {
-		return ""
+		return "", false
 	}
-	if !genericInterpreters[paneCmd] {
-		return paneCmd
-	}
-	pid := findPIDByComm(panePID, paneCmd, 0)
-	if pid == "" {
-		return paneCmd
-	}
-	cmdline := readProcCmdline(pid)
-	for _, token := range runnerTokens {
-		if strings.Contains(cmdline, token) {
-			return token
+	if genericInterpreters[paneCmd] {
+		// An interpreter says how the tool was started, not which tool it is;
+		// its command line does.
+		if pid := findPIDByComm(panePID, paneCmd, 0); pid != "" {
+			cmdline := readProcCmdline(pid)
+			for _, token := range runnerTokens {
+				if strings.Contains(cmdline, token) {
+					return token, true
+				}
+			}
 		}
 	}
-	return paneCmd
+	return paneCmd, workCommands[paneCmd]
 }
 
 // findPIDByComm searches the process tree below pid for a process with the given

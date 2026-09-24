@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/garber-squared/git-arborist/internal/activity"
+	"github.com/garber-squared/git-arborist/internal/agent"
 	"github.com/garber-squared/git-arborist/internal/worktree"
 )
 
@@ -92,12 +93,12 @@ func TestFilterLingersAfterTheFlashStops(t *testing.T) {
 	}
 }
 
-// A test run or an agent executing tools keeps a worktree on screen for as long
-// as it runs, with no need for anything to be written.
-func TestFilterKeepsWorktreesWithAProcessRunning(t *testing.T) {
+// A test run keeps a worktree on screen for as long as it runs, with no need for
+// anything to be written.
+func TestFilterKeepsWorktreesRunningWork(t *testing.T) {
 	m := filterModel("running", "idle")
-	m.allRows[0].Busy = true
 	m.allRows[0].Command = "rspec"
+	m.allRows[0].Working = true
 
 	m.activeOnly = true
 	m.applyFilter()
@@ -105,6 +106,53 @@ func TestFilterKeepsWorktreesWithAProcessRunning(t *testing.T) {
 	got := branches(m.rows)
 	if len(got) != 1 || got[0] != "running" {
 		t.Errorf("rows = %v, want only [running]", got)
+	}
+}
+
+// An agent in the pane keeps its worktree visible even while it waits for input:
+// a session holding a question is the tile the user most needs to find.
+func TestFilterKeepsWorktreesWithAWaitingAgent(t *testing.T) {
+	m := filterModel("asking", "quiet")
+	m.allRows[0].AgentPresent = true
+	m.allRows[0].ActiveAgent = "claude"
+	m.allRows[0].AgentActivity = agent.ActivityWaiting
+
+	m.activeOnly = true
+	m.applyFilter()
+
+	got := branches(m.rows)
+	if len(got) != 1 || got[0] != "asking" {
+		t.Errorf("rows = %v, want only [asking]: a waiting agent must not be hidden", got)
+	}
+}
+
+// A `watch` loop or a log tail left running in a pane must not pin its tile on
+// screen, or the filter would never hide anything again.
+func TestFilterHidesWorktreesRunningNonWork(t *testing.T) {
+	m := filterModel("watching")
+	m.allRows[0].Command = "watch"
+	m.allRows[0].Working = false
+
+	m.activeOnly = true
+	m.applyFilter()
+
+	if got := branches(m.rows); len(got) != 0 {
+		t.Errorf("rows = %v, want none: a monitor left running is not activity", got)
+	}
+}
+
+// A state file an agent left behind says nothing about whether it is still
+// there, so it must not keep a worktree on screen.
+func TestFilterIgnoresALeftoverAgentStateFile(t *testing.T) {
+	m := filterModel("departed")
+	m.allRows[0].ActiveAgent = "claude" // from state.json, with no process found
+	m.allRows[0].AgentPresent = false
+
+	m.activeOnly = true
+	m.applyFilter()
+
+	if got := branches(m.rows); len(got) != 0 {
+		t.Errorf("rows = %v, want none: a stale state file is not a running agent", got)
 	}
 }
 
