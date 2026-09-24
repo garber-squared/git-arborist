@@ -11,6 +11,7 @@ import (
 	"github.com/garber-squared/git-arborist/internal/activity"
 	"github.com/garber-squared/git-arborist/internal/agent"
 	"github.com/garber-squared/git-arborist/internal/register"
+	"github.com/garber-squared/git-arborist/internal/version"
 )
 
 const (
@@ -121,7 +122,7 @@ func (m *Model) renderNormalView() string {
 	if n := len(m.selected); n > 0 {
 		head += fmt.Sprintf(" · %d selected", n)
 	}
-	b.WriteString("\n" + m.renderTitle("  Worktree Dashboard  "+styleDim.Render(head)) + "\n")
+	b.WriteString("\n" + m.withVersion(m.renderTitle("  Worktree Dashboard  "+styleDim.Render(head))) + "\n")
 
 	if len(m.rows) == 0 {
 		b.WriteString(m.renderEmptyState())
@@ -184,6 +185,19 @@ func (m *Model) renderNormalView() string {
 	}
 
 	return b.String()
+}
+
+var styleVersion = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true) // bright white
+
+// withVersion right-aligns the build version on the title line, in the top
+// right corner. It is dropped when the terminal is too narrow to fit it.
+func (m *Model) withVersion(title string) string {
+	ver := styleVersion.Render("v"+version.Version) + "  "
+	gap := m.width - lipgloss.Width(title) - lipgloss.Width(ver)
+	if gap < 1 {
+		return title
+	}
+	return title + strings.Repeat(" ", gap) + ver
 }
 
 func (m *Model) renderExpandedView() string {

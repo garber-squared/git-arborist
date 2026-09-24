@@ -7,7 +7,7 @@ include .env
 # =============================================================================
 # TUI Dashboard
 # =============================================================================
-.PHONY: dashboard tui go-build install
+.PHONY: dashboard tui go-build install version
 
 # Launch the worktree dashboard TUI
 dashboard: go-build
@@ -15,10 +15,20 @@ dashboard: go-build
 
 tui: dashboard
 
+# Version is derived from the commit count on master: 0.<n/10>.<n%10>, so every
+# commit to master bumps it (40 commits -> 0.4.0).
+COMMIT_COUNT := $(shell git rev-list --count master 2>/dev/null || echo 0)
+VERSION := 0.$(shell echo $$(($(COMMIT_COUNT) / 10))).$(shell echo $$(($(COMMIT_COUNT) % 10)))
+LDFLAGS := -X github.com/garber-squared/git-arborist/internal/version.Version=$(VERSION)
+
 # Build the Go binary to the repo root. The ~/bin and ~/.local/bin entries on
 # PATH symlink to ./arborist, so building here refreshes the installed binary.
 go-build:
-	@go build -o arborist ./cmd/arborist
+	@go build -ldflags "$(LDFLAGS)" -o arborist ./cmd/arborist
+
+# Print the version the next build will carry.
+version:
+	@echo $(VERSION)
 
 # Build the binary and (re)create the PATH symlink pointing at it.
 install: go-build
@@ -92,6 +102,7 @@ help:
 	@echo "  make dashboard   - Build and launch the worktree dashboard TUI"
 	@echo "  make tui         - Alias for dashboard"
 	@echo "  make go-build    - Build the Go binary"
+	@echo "  make version     - Print the build version (from master commit count)"
 	@echo ""
 	@echo "Documentation Commands:"
 	@echo "  make ctags-report              - Generate codebase report to docs/ctags-report.md"
