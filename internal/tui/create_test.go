@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/garber-squared/git-arborist/internal/worktree"
 )
@@ -209,36 +208,8 @@ func keyMsg(s string) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
 
-func TestWrapHelp(t *testing.T) {
-	items := []string{"a: one", "b: two", "c: three"}
-
-	eq(t, "fits on one line", wrapHelp(items, 100), []string{"a: one  b: two  c: three"})
-	eq(t, "breaks at the width", wrapHelp(items, 16), []string{"a: one  b: two", "c: three"})
-	// A hint is never split, even when it alone exceeds the width.
-	eq(t, "unsplittable hint", wrapHelp([]string{"x: a very long hint"}, 5), []string{"x: a very long hint"})
-
-	// Every hint must survive wrapping, at any width, and no line may exceed
-	// it — that overflow is what cut the footer off at the terminal edge.
-	m := NewModel("/repo", "")
-	m.gridRows = 2
-	for _, width := range []int{20, 40, 80, 100, 150, 400} {
-		lines := wrapHelp(m.helpItems(), width)
-		joined := strings.Join(lines, "  ")
-		for _, item := range m.helpItems() {
-			if !strings.Contains(joined, item) {
-				t.Errorf("width %d: dropped %q", width, item)
-			}
-		}
-		for _, line := range lines {
-			if width >= 40 && lipgloss.Width(line) > width {
-				t.Errorf("width %d: line overflows (%d): %q", width, lipgloss.Width(line), line)
-			}
-		}
-	}
-}
-
-// TestFooterLeavesRoomForTiles guards the layout math: the wrapped footer must
-// be accounted for, so tiles plus footer never exceed the terminal height.
+// TestFooterLeavesRoomForTiles guards the layout math: the footer must be
+// accounted for, so tiles plus footer never exceed the terminal height.
 func TestFooterLeavesRoomForTiles(t *testing.T) {
 	for _, width := range []int{60, 100, 150} {
 		m := NewModel("/repo", "")
@@ -249,8 +220,8 @@ func TestFooterLeavesRoomForTiles(t *testing.T) {
 		m.computeLayout()
 		used := dashHeaderH + m.tileH*m.visibleRows + m.footerH()
 		if used > m.height {
-			t.Errorf("width %d: layout wants %d rows of %d (help = %d lines, message = %d)",
-				width, used, m.height, len(m.helpLines), m.messageH())
+			t.Errorf("width %d: layout wants %d rows of %d (message = %d)",
+				width, used, m.height, m.messageH())
 		}
 	}
 }

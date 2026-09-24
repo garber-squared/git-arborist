@@ -89,6 +89,10 @@ type Model struct {
 	histFile        string          // persists history across sessions
 	scope           ViewScope       // which worktrees to display (all vs. root-only)
 	create          createState     // interactive create-worktree flow (c)
+	showKeys        bool            // the `?` keybinding overlay is open
+	gitStatus       []string        // the `g` overlay's colored git status lines; nil = closed
+	gitBranch       string          // branch the `g` overlay is showing
+	overlayScroll   int             // first line shown when an overlay must scroll
 
 	// selected marks tiles (by worktree path) for multi-tile actions such as
 	// sending input to several panes at once. Keyed by path so marks survive a
@@ -104,10 +108,9 @@ type Model struct {
 	flashOn bool
 
 	// Layout
-	helpLines   []string // footer help, wrapped to the terminal width
-	visibleCols int      // grid columns
-	gridRows    int      // total rows in grid
-	visibleRows int      // rows visible at once (capped at 4)
+	visibleCols int // grid columns
+	gridRows    int // total rows in grid
+	visibleRows int // rows visible at once (capped at 4)
 	tileW       int
 	tileH       int
 	scrollCol   int // single-row horizontal scroll (legacy)

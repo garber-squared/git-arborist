@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -230,6 +229,45 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	// The keybinding overlay swallows keys until it is closed; ctrl+c still
+	// quits.
+	if m.showKeys {
+		switch msg.String() {
+		case "?", "esc", "q":
+			m.showKeys = false
+			return m, nil
+		case "j", "down":
+			m.overlayScroll++ // clamped when rendered
+			return m, nil
+		case "k", "up":
+			m.overlayScroll = max(0, m.overlayScroll-1)
+			return m, nil
+		case "ctrl+c":
+			m.showKeys = false
+		default:
+			return m, nil
+		}
+	}
+
+	// The `g` git status overlay behaves the same way.
+	if m.gitStatus != nil {
+		switch msg.String() {
+		case "g", "esc", "q":
+			m.gitStatus = nil
+			return m, nil
+		case "j", "down":
+			m.overlayScroll++
+			return m, nil
+		case "k", "up":
+			m.overlayScroll = max(0, m.overlayScroll-1)
+			return m, nil
+		case "ctrl+c":
+			m.gitStatus = nil
+		default:
+			return m, nil
+		}
+	}
+
 	// Handle confirmation state first
 	if m.confirming {
 		if msg.String() == "d" {
@@ -263,7 +301,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.sendToPane("Down")
 		case "k":
 			return m, m.sendToPane("Up")
-		case "left", "right", "up", "down", "h", "d", "r", "g", "s", "n", "N", " ", "a", "f":
+		case "left", "right", "up", "down", "h", "d", "r", "s", "n", "N", " ", "a", "f":
 			return m, nil
 		case "q", "ctrl+c":
 			m.expanded = false
@@ -283,6 +321,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.watcher.Close()
 		}
 		return m, tea.Quit
+
+	case msg.String() == "?":
+		m.showKeys = true
+		m.overlayScroll = 0
 
 	case msg.String() == "h":
 		m.expanded = true
@@ -545,14 +587,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case msg.String() == "g":
-		if m.cursorIdx < len(m.rows) {
-			row := m.rows[m.cursorIdx]
-			cmd := exec.Command("git", "-C", row.Worktree.Path, "status", "--short")
-			out, err := cmd.Output()
-			if err == nil {
-				m.message = string(out)
-			}
-		}
+		m.openGitStatus()
 
 	case msg.String() == "c":
 		return m, m.openCreate(worktree.ModeWork)
