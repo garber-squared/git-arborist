@@ -1,0 +1,36 @@
+#!/bin/sh
+# When a merge lands on master, stamp internal/version/VERSION with the new
+# master commit count. (pre-merge-commit can't do this: git neither exposes
+# MERGE_HEAD to it nor picks up index changes it makes.)
+#   - true merge:   amend the just-created merge commit (count is unchanged)
+#   - fast-forward: add a "Bump version" commit on top (count + 1)
+# Nothing happens if HEAD already carries the right version, e.g. after
+# pulling a master that was stamped elsewhere.
+
+. "$(dirname "$0")/lib/version.sh"
+
+[ "$1" = 1 ] && exit 0 # squash merge: no commit was made
+[ "$(git symbolic-ref --short -q HEAD)" = master ] || exit 0
+
+count=$(git rev-list --count HEAD)
+[ "$(version_at HEAD)" = "$(version_for "$count")" ] && exit 0
+
+case "$(git reflog -1 --format=%gs HEAD)" in
+*Fast-forward*)
+	ver=$(version_for $((count + 1)))
+	write_version "$ver"
+	git commit -q --no-verify -m "Bump version to $ver" -- "$VERSION_FILE"
+	;;
+*)
+	ver=$(version_for "$count")
+	write_version "$ver"
+	# `git commit --amend` refuses to run while post-merge still sees the merge
+	# in progress, so rebuild the merge commit with the same parents and message.
+	git add "$VERSION_FILE"
+	parents=$(git rev-list --parents -n 1 HEAD | cut -d' ' -f2- | sed 's/[^ ]*/-p &/g')
+	# shellcheck disable=SC2086 # $parents is a list of -p flags
+	new=$(git log -1 --format=%B HEAD | git commit-tree "$(git write-tree)" $parents)
+	git update-ref -m "post-merge: stamp version $ver" HEAD "$new"
+	;;
+esac
+echo "post-merge: master version set to $ver"

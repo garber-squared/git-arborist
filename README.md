@@ -306,6 +306,170 @@ internal/
 
 File changes (`.git/` and `.sideby/agent/`) trigger targeted row refreshes. Manual refresh with `r` reloads everything.
 
+## Study plan
+
+arborist is not meant to replace bash, git, tmux or the GitHub CLI. It is meant
+to teach them. Every key runs ordinary commands: `git`, `tmux`, `gh` and
+`docker`, plus reads from `/proc` and inotify. This six-week plan has you do
+each action by hand first, then press the key and check that arborist did the
+same thing. The goal is that you can read any tile, flash or badge and name the
+command behind it.
+
+**Habit for the whole course:** before you press a key, say out loud which
+command you think it will run. To check yourself, trace the commands arborist
+actually starts:
+
+```bash
+strace -f -e trace=execve -o /tmp/arborist.trace ./arborist
+grep -oE 'execve\("[^"]+", \[[^]]*' /tmp/arborist.trace | less
+```
+
+### Phase 0: Groundwork (2–3 days)
+
+| Topic | Practice | Where it shows up in arborist |
+|---|---|---|
+| Shell, `PATH`, symlinks | `echo $PATH`, `ln -sf`, `readlink -f $(which arborist)` | `make install` symlinks `~/bin/arborist` |
+| Exit codes, `&&` vs `;` | `false && echo a; false ; echo b` | `c` runs *setup && start*; `C` runs *setup ; watch* |
+| Environment variables | `export`, `env`, `$1` in scripts | `ARBORIST_WORKTREE`, `ARBORIST_BRANCH`, `ARBORIST_ISSUE`, `ARBORIST_PORT` |
+| `make` | Read the `Makefile`; run `make -n dashboard` | `make go-build`, `make hooks` |
+
+- [ ] Explain in one sentence why `c` uses `&&` but `C` uses `;`
+
+### Phase 1: How git stores state (week 1)
+
+This phase explains the Git Status column and the `⚡add`, `⚡commit` and
+`⚡push` flashes.
+
+| Concept | Commands | Where it shows up in arborist |
+|---|---|---|
+| Working tree, index, HEAD | `git status --porcelain` (learn the two-column `XY` codes), `ls -l --time-style=full-iso .git/index` | The clean/dirty column. A plain `git status` rewrites the index, so arborist counts it as a `git add` only when the staged count goes up |
+| Ahead and behind | `git rev-list --left-right --count @{upstream}...HEAD`, `git push -u` | The `↑` / `↓` arrows on a tile |
+| Reflog and refs | `git reflog`, `cat .git/HEAD`, `ls .git/refs/remotes/origin` | The `⚡commit` and `⚡push` flashes |
+
+- [ ] Make one commit and push it. After each step, list the files under `.git/` that changed (`touch /tmp/marker` first, then `find .git -newer /tmp/marker`)
+- [ ] Explain what `@{upstream}` and the `...` range mean
+
+### Phase 2: Worktrees (weeks 1–2)
+
+A worktree is a second checkout that shares one repository. Learn which files
+it has for itself and which it shares with the others.
+
+- **Lifecycle:** `git worktree add worktrees/foo -b foo`, `git worktree list --porcelain`, `git worktree remove`, `git worktree prune`
+- **Layout:** `cat worktrees/foo/.git`. A worktree's `.git` is a file that points into `.git/worktrees/foo/`. Each worktree has its own `HEAD`, `index` and `COMMIT_EDITMSG`, and shares refs, objects and config with the others.
+- **Ignoring:** `.git/info/exclude` compared with `.gitignore`
+
+- [ ] Repeat what `c` does, entirely by hand:
+    1. Create the worktree.
+    2. Add `worktrees/` to `.git/info/exclude`.
+    3. Symlink the `.env*` files.
+    4. Copy `.claude/settings.local.json`.
+- [ ] Press `c` on a new branch and compare the two results with `diff -r` and `ls -la`
+
+### Phase 3: Branches, remotes and discovery (week 2)
+
+This phase explains the `c` picker's branch list.
+
+- **Refreshing and listing:** `git fetch --prune`, `git for-each-ref refs/heads refs/remotes`
+- **Default branch:** `git symbolic-ref --short refs/remotes/origin/HEAD`
+- **Local branch from a remote-only one:** `git switch --track origin/x`
+
+- [ ] Build the picker's list yourself: branches without a worktree, local ones before remote-only ones. Use `for-each-ref`, `worktree list` and `comm` or `grep -v`.
+
+### Phase 4: tmux (weeks 2–3)
+
+Most of the dashboard's keys are tmux commands. Learn how panes are named:
+`session:window.pane`, or a pane id such as `%5`.
+
+| Key | tmux command to practice |
+|---|---|
+| `Enter` | `tmux select-window -t session:3` |
+| `n` / `N` | `tmux new-window -c <path> -n <name>` |
+| `i`, `j`/`k`, `e`/`t` | `tmux send-keys -t %5 -l -- 'text'`, `tmux send-keys -t %5 Enter` |
+| Tile preview | `tmux capture-pane -p -e -t %5` |
+| `d` | `tmux kill-window -t …` |
+| Discovery | `tmux list-panes -a -F '#{pane_id} #{pane_current_command} #{pane_current_path}'` |
+
+- [ ] Write a 10-line script that sends the same command to every pane whose path is under `worktrees/`. That reproduces `Space` + `a` + `i`.
+
+### Phase 5: GitHub from the shell (week 3)
+
+This phase explains the PR column, `o`, `I`, and creating a worktree from an
+issue number.
+
+- **Pull requests:** `gh pr view --json number,state,title,isDraft`, `--jq`, `gh pr view --web`
+- **Issue branches:** `gh issue develop 123 --base staging`, `gh issue develop --list 123`
+- **Labels:** `gh label list --search`, `gh label create`, `gh issue edit --add-label`
+
+- [ ] Set `git config arborist.issueLabel status:in-development`, create a worktree from an issue number, and trace which `gh` calls ran
+- [ ] Explain why a branch named `release-1.6.0` does *not* get the label (see [Issue labels](#issue-labels))
+
+### Phase 6: Processes and /proc (weeks 3–4)
+
+This phase explains the `f` filter, which decides whether a pane holds an agent
+or running work.
+
+- **Process trees:** `ps -o pid,ppid,comm`, `pstree -p`, and which process is in the terminal's foreground
+- **Reading /proc:** `cat /proc/<pid>/comm`, `tr '\0' ' ' < /proc/<pid>/cmdline`, `cat /proc/<pid>/task/<pid>/children`
+
+- [ ] Starting from the `pane_pid` tmux gives you, walk down the process tree until you reach `claude`, `rspec` or `go test`
+- [ ] Read `workCommands` in `internal/agent/detect.go` and explain why `watch`, `tail -f` and `vim` are left out on purpose
+
+### Phase 7: Filesystem events (week 4)
+
+This phase explains why arborist updates the moment something changes instead
+of polling.
+
+- **Watching live:** run `inotifywait -m -r -e modify,create,delete,move .` in one pane while you edit, `git add` and `git commit` in another
+- **Limits:** `cat /proc/sys/fs/inotify/max_user_watches`. Compare it with `maxWatchDirs = 4096` in `internal/watcher/watcher.go`.
+
+- [ ] Say which inotify events cause each flash: `⚡file`, `⚡add`, `⚡commit`, `⚡push`
+- [ ] Explain why a push is matched by branch name but a commit by per-worktree files (see Phase 2)
+
+### Phase 8: Configuration and setup scripts (weeks 4–5)
+
+arborist keeps all its settings in git config, under `arborist.*` keys.
+
+- **git config as a key-value store:** `--get`, `--unset`, `--get-regexp`, `--file .gitmodules`, and local vs global scope
+- **Your own setup:** write a `scripts/worktree-setup.sh` that takes the worktree path as `$1`. Then set `arborist.start` and `arborist.watch`.
+
+- [ ] Break your setup script on purpose, for example with `exit 1`. Check that `c` doesn't start the agent but `C` still starts the watcher, and explain why.
+
+### Phase 9: Ports, Docker and git hooks (week 5)
+
+- **Dev ports:** `.worktree-ports` and `git config arborist.portBase 8080`. Check who is listening with `ss -ltnp`.
+- **Docker:** `docker compose up`, then `docker ps -aq --filter label=com.docker.compose.project.working_dir=$PWD`. This is how `d` finds the containers to remove.
+- **Git hooks:** `git config core.hooksPath githooks`. Read `githooks/pre-push` and `githooks/post-merge`.
+
+- [ ] Name the four fields `pre-push` reads from stdin (`local_ref local_sha remote_ref remote_sha`) and what each one holds
+- [ ] Start a compose stack in a worktree, delete the worktree with `d`, and confirm the containers and the port entry are gone
+
+### Phase 10: Reading the source (week 6)
+
+- **Go basics:** `exec.Command`, error handling, maps. Use `grep -rn 'exec.Command' internal` as your index into the code: every call is an external command you now know.
+- **Bubble Tea's Elm architecture:** Model → Update → View, in `internal/tui/model.go`, `update.go` and `view.go`
+
+- [ ] Read `internal/worktree/create_test.go` closely. It builds real repositories and remotes from scratch, so it also works as a git tutorial.
+
+### Capstone
+
+Write your own `worktree.sh` that supports `--watch`, using only shell, git,
+tmux and gh. Then decide which parts are worth the dashboard and which are
+better as a one-liner.
+
+- [ ] Create the worktree
+- [ ] Run setup
+- [ ] Open the tmux window
+- [ ] Export the `ARBORIST_*` variables
+- [ ] Assign a port
+- [ ] Label the issue
+
+### References
+
+- **Man pages:** `man git-worktree`, `man git-status`, `man git-rev-list`, `man githooks`, `man tmux` (the FORMATS and COMMANDS sections), `man proc`, `man inotify`, `gh help formatting`
+- **Pro Git:** chapters 2, 3, 7 and 10 (git internals)
+- **tmux 2** by Brian Hogan
+- **The Linux Command Line** by William Shotts
+
 ## License
 
 MIT

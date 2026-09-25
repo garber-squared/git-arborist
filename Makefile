@@ -7,7 +7,7 @@ include .env
 # =============================================================================
 # TUI Dashboard
 # =============================================================================
-.PHONY: dashboard tui go-build install version
+.PHONY: dashboard tui go-build install version hooks
 
 # Launch the worktree dashboard TUI
 dashboard: go-build
@@ -15,23 +15,24 @@ dashboard: go-build
 
 tui: dashboard
 
-# Version is derived from the commit count on master: 0.<n/10>.<n%10>, so every
-# commit to master bumps it (40 commits -> 0.4.0).
-COMMIT_COUNT := $(shell git rev-list --count master 2>/dev/null || echo 0)
-VERSION := 0.$(shell echo $$(($(COMMIT_COUNT) / 10))).$(shell echo $$(($(COMMIT_COUNT) % 10)))
-LDFLAGS := -X github.com/garber-squared/git-arborist/internal/version.Version=$(VERSION)
-
 # Build the Go binary to the repo root. The ~/bin and ~/.local/bin entries on
 # PATH symlink to ./arborist, so building here refreshes the installed binary.
 go-build:
-	@go build -ldflags "$(LDFLAGS)" -o arborist ./cmd/arborist
+	@go build -o arborist ./cmd/arborist
 
-# Print the version the next build will carry.
+# Print the version the next build will carry. It lives in
+# internal/version/VERSION and is kept in step with master's commit count by
+# the githooks/ pre-push and post-merge hooks (see `make hooks`).
 version:
-	@echo $(VERSION)
+	@cat internal/version/VERSION
+
+# Point git at the tracked hooks in githooks/ (shared by all worktrees).
+hooks:
+	@git config core.hooksPath githooks
+	@echo "core.hooksPath -> githooks"
 
 # Build the binary and (re)create the PATH symlink pointing at it.
-install: go-build
+install: hooks go-build
 	@ln -sf $(CURDIR)/arborist $(HOME)/bin/arborist
 	@echo "Linked $(HOME)/bin/arborist -> $(CURDIR)/arborist"
 

@@ -1,0 +1,29 @@
+#!/bin/sh
+# Refuse to push to master unless the pushed commit's internal/version/VERSION
+# matches its commit count. When the pushed commit is the checked-out HEAD, add
+# a "Bump version" commit (count + 1) and ask for the push to be re-run: a hook
+# can't change the commits a push has already chosen to send.
+
+. "$(dirname "$0")/lib/version.sh"
+
+zero=0000000000000000000000000000000000000000
+status=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+	[ "$remote_ref" = refs/heads/master ] || continue
+	[ "$local_sha" = "$zero" ] && continue # deleting master
+
+	count=$(git rev-list --count "$local_sha")
+	[ "$(version_at "$local_sha")" = "$(version_for "$count")" ] && continue
+
+	status=1
+	if [ "$local_sha" = "$(git rev-parse HEAD)" ]; then
+		ver=$(version_for $((count + 1)))
+		write_version "$ver"
+		git commit -q --no-verify -m "Bump version to $ver" -- "$VERSION_FILE"
+		echo "pre-push: added commit bumping version to $ver. Push again." >&2
+	else
+		echo "pre-push: $local_ref would reach master with a stale version;" \
+			"check it out and push again so the version can be bumped." >&2
+	fi
+done
+exit $status
