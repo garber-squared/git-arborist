@@ -27,10 +27,11 @@ var (
 	styleIdle    = lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow
 	styleDim     = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // dim gray
 
-	borderSelected   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("4")).Background(lipgloss.Color("#2b2a1a")) // blue border + gentle yellow bg
-	borderUnselected = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8"))                                       // dim gray
-	borderExpanded   = lipgloss.NewStyle().Border(lipgloss.DoubleBorder()).BorderForeground(lipgloss.Color("4")).Background(lipgloss.Color("#2b2a1a"))
-	borderMarked     = lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(lipgloss.Color("5")) // magenta: marked for multi-tile actions
+	borderSelected      = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("4")).Background(lipgloss.Color("#2b2a1a")) // blue border + gentle yellow bg
+	borderUnselected    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8"))                                       // dim gray
+	borderExpanded      = lipgloss.NewStyle().Border(lipgloss.DoubleBorder()).BorderForeground(lipgloss.Color("4")).Background(lipgloss.Color("#2b2a1a"))
+	borderMarked        = lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(lipgloss.Color("5"))                                         // magenta: marked for multi-tile actions
+	borderFocusedMarked = lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(lipgloss.Color("213")).Background(lipgloss.Color("#2b2a1a")) // pink: focused and marked
 
 	styleMark = lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Bold(true)
 
@@ -215,6 +216,9 @@ func (m *Model) renderExpandedView() string {
 
 	now := time.Now()
 	style := borderExpanded
+	if m.selected[row.Worktree.Path] {
+		style = style.BorderForeground(lipgloss.Color("213"))
+	}
 	if _, active := m.recentActivity(row, now); active && m.flashOn {
 		style = style.BorderForeground(colorActivity)
 	}
@@ -272,7 +276,7 @@ func (m *Model) renderInsertFooter() string {
 	if n := len(m.insertTargets()); n > 1 {
 		dest = fmt.Sprintf("%d panes", n)
 	}
-	b.WriteString(fmt.Sprintf("\n  enter: send to %s  ↑/↓: history  esc: cancel\n", dest))
+	b.WriteString(fmt.Sprintf("\n  enter: send to %s  ↑/↓: history  tab: complete  esc: cancel\n", dest))
 	return b.String()
 }
 
@@ -378,6 +382,10 @@ func (m *Model) renderTile(row Row, focused bool, now time.Time) string {
 	marked := m.selected[row.Worktree.Path]
 	var style lipgloss.Style
 	switch c, ok := repoColor(row.Worktree.Repo); {
+	case focused && marked:
+		// Pink rather than the focus blue, so the tile under the cursor still
+		// shows it is part of the selection.
+		style = borderFocusedMarked
 	case focused:
 		style = borderSelected
 	case marked:

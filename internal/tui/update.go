@@ -154,9 +154,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Insert mode captures every key until the text is sent or cancelled.
 	// Up/down move a selection through the (fuzzy-filtered) history list
 	// rendered above the input; enter sends the selection if there is one,
-	// otherwise the typed text.
+	// otherwise the typed text. Tab completes the input from history.
 	if m.inserting {
 		switch msg.String() {
+		case "tab":
+			if text := m.historyCompletion(); text != "" {
+				m.input.SetValue(text)
+				m.input.CursorEnd()
+				m.histSel = -1
+			}
+			return m, nil
 		case "enter":
 			text := m.input.Value()
 			if filtered := m.filteredHistory(); m.histSel >= 0 && m.histSel < len(filtered) {

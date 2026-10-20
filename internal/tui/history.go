@@ -73,3 +73,24 @@ func (m *Model) filteredHistory() []string {
 	}
 	return out
 }
+
+// historyCompletion returns the text tab should complete the input to: the
+// highlighted history entry if there is one, else the most recent entry that
+// starts with the typed text, else the most recent fuzzy match. Empty means
+// nothing to complete.
+func (m *Model) historyCompletion() string {
+	filtered := m.filteredHistory()
+	if m.histSel >= 0 && m.histSel < len(filtered) {
+		return filtered[m.histSel]
+	}
+	query := strings.ToLower(m.input.Value())
+	for i := len(filtered) - 1; i >= 0; i-- {
+		if strings.HasPrefix(strings.ToLower(filtered[i]), query) {
+			return filtered[i]
+		}
+	}
+	if query != "" && len(filtered) > 0 {
+		return filtered[len(filtered)-1]
+	}
+	return ""
+}
