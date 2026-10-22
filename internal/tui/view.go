@@ -39,7 +39,11 @@ var (
 	// the one signal colour left: blue is selection, magenta a mark, and
 	// green/red/yellow are agent states.
 	colorActivity = lipgloss.Color("14")
-	styleActivity = lipgloss.NewStyle().Foreground(colorActivity).Bold(true)
+
+	// colorClaudeActivity marks a worktree whose Claude session just wrote its
+	// transcript. Bright green echoes the running-agent colour, so the flash
+	// says "Claude is working" rather than "a file changed".
+	colorClaudeActivity = lipgloss.Color("10")
 
 	// repoPalette holds subtle, distinct colors used to tint submodule tiles so
 	// worktrees from different submodules can be told apart at a glance. All
@@ -219,8 +223,8 @@ func (m *Model) renderExpandedView() string {
 	if m.selected[row.Worktree.Path] {
 		style = style.BorderForeground(lipgloss.Color("213"))
 	}
-	if _, active := m.recentActivity(row, now); active && m.flashOn {
-		style = style.BorderForeground(colorActivity)
+	if ev, active := m.recentActivity(row, now); active && m.flashOn {
+		style = style.BorderForeground(activityColor(ev.Kind))
 	}
 	tile := m.renderTileAt(row, expW, expH, style, m.selected[row.Worktree.Path], now)
 
@@ -402,8 +406,8 @@ func (m *Model) renderTile(row Row, focused bool, now time.Time) string {
 	// A worktree that changed within the activity window flashes: only the
 	// border colour alternates, so the border style still says whether the tile
 	// is focused or marked, and the grid never shifts.
-	if _, active := m.recentActivity(row, now); active && m.flashOn {
-		style = style.BorderForeground(colorActivity)
+	if ev, active := m.recentActivity(row, now); active && m.flashOn {
+		style = style.BorderForeground(activityColor(ev.Kind))
 	}
 
 	return m.renderTileAt(row, m.tileW, m.tileH, style, marked, now)
@@ -442,7 +446,8 @@ func (m *Model) renderTileAt(row Row, tileW, tileH int, style lipgloss.Style, ma
 	}
 	if ev, ok := m.recentActivity(row, now); ok {
 		// The flashing border says something happened; this says what.
-		infoParts = append(infoParts, styleActivity.Render("⚡"+ev.Kind.Label()))
+		label := lipgloss.NewStyle().Foreground(activityColor(ev.Kind)).Bold(true)
+		infoParts = append(infoParts, label.Render("⚡"+ev.Kind.Label()))
 	}
 	infoParts = append(infoParts, row.GitStatus.String())
 	if row.PR != nil {
@@ -529,6 +534,15 @@ func truncateToWidth(s string, maxW int) string {
 		return ansi.Truncate(s, maxW, "")
 	}
 	return ansi.Truncate(s, maxW-1, "…")
+}
+
+// activityColor is the flash colour for a kind of activity: green for Claude
+// working, cyan for everything that happened on disk.
+func activityColor(kind activity.Kind) lipgloss.Color {
+	if kind == activity.KindClaude {
+		return colorClaudeActivity
+	}
+	return colorActivity
 }
 
 func styleAgent(display, name string, activity agent.Activity) string {

@@ -875,12 +875,14 @@ func (m *Model) refreshAll() tea.Cmd {
 		w, err := watcher.New(m.sendFn)
 		if err == nil {
 			m.watcher = w
+			targets := make([]watcher.Target, 0, len(m.allRows))
 			for _, row := range m.allRows {
-				w.Watch(watcher.Target{
+				targets = append(targets, watcher.Target{
 					Path:   row.Worktree.Path,
 					Branch: row.Worktree.Branch,
 				})
 			}
+			w.WatchAll(targets)
 		}
 	}
 
@@ -1024,6 +1026,11 @@ func (m *Model) recordChange(msg watcher.FileChangedMsg) {
 	case watcher.KindFile:
 		m.refreshGitStatus(msg.WorktreePath)
 		m.activity.Record(msg.WorktreePath, activity.KindFile, at)
+
+	case watcher.KindClaude:
+		// A transcript write changes nothing arborist displays besides the
+		// activity itself; edits Claude makes arrive as file events of their own.
+		m.activity.Record(msg.WorktreePath, activity.KindClaude, at)
 
 	case watcher.KindGit:
 		staged := m.refreshGitStatus(msg.WorktreePath)

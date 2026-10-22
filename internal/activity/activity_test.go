@@ -105,6 +105,7 @@ func TestKindLabel(t *testing.T) {
 	for kind, want := range map[Kind]string{
 		KindNone:   "",
 		KindFile:   "file",
+		KindClaude: "claude",
 		KindStage:  "add",
 		KindCommit: "commit",
 		KindPush:   "push",

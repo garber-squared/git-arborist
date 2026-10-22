@@ -86,16 +86,17 @@ movement; tiles that leave the current scope drop out of it.
 
 ## Activity
 
-A worktree that changes on disk flashes its border in cyan for five seconds, and
-for those five seconds its tile says what happened: `⚡file`, `⚡add`, `⚡commit`
-or `⚡push`. The signal comes from the filesystem watcher, so it is immediate
-rather than polled.
+A worktree that changes on disk flashes its border in cyan for five seconds —
+green when it is a Claude session working — and for those five seconds its tile
+says what happened: `⚡file`, `⚡claude`, `⚡add`, `⚡commit` or `⚡push`. The
+signal comes from the filesystem watcher, so it is immediate rather than polled.
 
 What counts as activity:
 
 | Signal | How it is detected |
 |---|---|
 | a file written, created or removed | the working tree is watched, minus `.git`, dependency, build and log directories |
+| a Claude session working | its transcript under `~/.claude/projects/<encoded worktree path>/` (or `$CLAUDE_CONFIG_DIR/projects`) was written — Claude appends to it on every prompt, response and tool call, so this catches reading and thinking that change no project file |
 | `git add` | the worktree's index was rewritten *and* its staged count went up |
 | `git commit` | the worktree's own HEAD reflog or `COMMIT_EDITMSG` was written |
 | `git push` | the remote-tracking ref for the worktree's branch moved |

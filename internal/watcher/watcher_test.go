@@ -3,8 +3,12 @@ package watcher
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // newTestWatcher builds a Watcher with its lookup tables filled in but no
@@ -16,13 +20,19 @@ func newTestWatcher(targets ...Target) *Watcher {
 		logDirs:  make(map[string]string),
 		byBranch: make(map[string]string),
 		lastFile: make(map[string]time.Time),
+
+		claudeRoot: testClaudeRoot,
+		claudeDirs: make(map[string]string),
 	}
 	for _, t := range targets {
 		gitDir := filepath.Join(t.Path, ".git")
 		w.register(t, gitDir, gitDir)
+		w.claudeDirs[claudeKey(claudeDirName(t.Path))] = t.Path
 	}
 	return w
 }
+
+const testClaudeRoot = "/home/user/.claude/projects"
 
 func TestGitDirsMainWorktree(t *testing.T) {
 	root := t.TempDir()
@@ -311,5 +321,108 @@ func TestAllowFileIsPerWorktree(t *testing.T) {
 	}
 	if !w.allowFile("/repo/worktrees/two", now) {
 		t.Error("one busy worktree must not silence another")
+	}
+}
+
+func TestClaudeDirName(t *testing.T) {
+	tests := map[string]string{
+		"/home/user/Development/git-arborist": "-home-user-Development-git-arborist",
+		"/repo/worktrees/fix_the.thing":       "-repo-worktrees-fix-the-thing",
+		"/repo/worktrees/caf\u00e9":           "-repo-worktrees-caf-",
+		"/repo/worktrees/\U0001F333":          "-repo-worktrees---",
+	}
+	for path, want := range tests {
+		if got := claudeDirName(path); got != want {
+			t.Errorf("claudeDirName(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestClassifyClaudeTranscript(t *testing.T) {
+	const wtPath = "/repo/worktrees/feature"
+	w := newTestWatcher(Target{Path: wtPath, Branch: "feature"})
+	project := filepath.Join(testClaudeRoot, claudeDirName(wtPath))
+
+	for _, name := range []string{
+		filepath.Join(project, "3cb0e2ce.jsonl"),
+		filepath.Join(project, "3cb0e2ce", "subagents", "agent-a1.jsonl"),
+	} {
+		msg, ok := w.classify(name)
+		if !ok {
+			t.Errorf("a transcript write (%s) must be reported", name)
+			continue
+		}
+		if msg.Kind != KindClaude || msg.WorktreePath != wtPath {
+			t.Errorf("classify(%s) = %q for %q, want %q for %q", name, msg.Kind, msg.WorktreePath, KindClaude, wtPath)
+		}
+	}
+}
+
+// Tool output and memory files are not transcripts, and another directory's
+// sessions belong to another directory — including the repository root, whose
+// encoded name is a prefix of every worktree under it.
+func TestClassifyClaudeIgnoresOtherFiles(t *testing.T) {
+	const wtPath = "/repo/worktrees/feature"
+	w := newTestWatcher(Target{Path: wtPath})
+	project := filepath.Join(testClaudeRoot, claudeDirName(wtPath))
+
+	for _, name := range []string{
+		filepath.Join(project, "memory", "MEMORY.md"),
+		filepath.Join(project, "3cb0e2ce", "tool-results", "out.txt"),
+		filepath.Join(testClaudeRoot, claudeDirName("/repo"), "3cb0e2ce.jsonl"),
+		filepath.Join(testClaudeRoot, claudeDirName(wtPath+"-two"), "3cb0e2ce.jsonl"),
+	} {
+		if msg, ok := w.classify(name); ok {
+			t.Errorf("classify(%s) reported %q, want nothing", name, msg.Kind)
+		}
+	}
+}
+
+// Claude Code cuts a long project directory name and appends a hash of the full
+// path; the worktree is still found by the part before the hash.
+func TestClassifyClaudeLongPath(t *testing.T) {
+	wtPath := "/repo/worktrees/" + strings.Repeat("a-very-long-branch-name-", 10)
+	w := newTestWatcher(Target{Path: wtPath})
+	dir := claudeDirName(wtPath)[:claudeMaxDirName] + "-1x2y3z"
+
+	msg, ok := w.classify(filepath.Join(testClaudeRoot, dir, "3cb0e2ce.jsonl"))
+	if !ok || msg.WorktreePath != wtPath {
+		t.Errorf("classify = %q, %v; want the long-named worktree", msg.WorktreePath, ok)
+	}
+}
+
+// A large working tree can spend the whole watch budget; the worktrees after it
+// must still be able to report a Claude session.
+func TestWatchAllPlacesClaudeWatchesBeforeWorkingTrees(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "claude"))
+
+	big := filepath.Join(root, "big")
+	small := filepath.Join(root, "small")
+	for i := range 20 {
+		if err := os.MkdirAll(filepath.Join(big, "pkg", string(rune('a'+i))), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(small, 0755); err != nil {
+		t.Fatal(err)
+	}
+	smallProject := filepath.Join(root, "claude", "projects", claudeDirName(small))
+	if err := os.MkdirAll(smallProject, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	w, err := New(func(tea.Msg) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	// Leave room for the Claude watches but not for the big working tree.
+	w.watchDirs = maxWatchDirs - 5
+
+	w.WatchAll([]Target{{Path: big}, {Path: small}})
+
+	if !slices.Contains(w.fsw.WatchList(), smallProject) {
+		t.Errorf("the second worktree's Claude directory is not watched; watching %v", w.fsw.WatchList())
 	}
 }

@@ -1,7 +1,8 @@
 // Package activity tracks recent signs of work in a worktree: files written in
-// the working tree, and the git operations (staging, committing, pushing) that
-// leave their mark in git's metadata. The dashboard uses it to flash the border
-// of a worktree that just changed, and to hide the ones that have gone quiet.
+// the working tree, a Claude session in it writing its transcript, and the git
+// operations (staging, committing, pushing) that leave their mark in git's
+// metadata. The dashboard uses it to flash the border of a worktree that just
+// changed, and to hide the ones that have gone quiet.
 package activity
 
 import "time"
@@ -25,6 +26,9 @@ const (
 	KindNone Kind = iota
 	// KindFile is a file in the working tree written, created or removed.
 	KindFile
+	// KindClaude is a Claude Code session in the worktree writing its
+	// transcript, which it does on every prompt, response and tool call.
+	KindClaude
 	// KindStage is a git add: the index gained staged changes.
 	KindStage
 	// KindCommit is a git commit: the worktree's HEAD reflog grew.
@@ -38,6 +42,8 @@ func (k Kind) Label() string {
 	switch k {
 	case KindFile:
 		return "file"
+	case KindClaude:
+		return "claude"
 	case KindStage:
 		return "add"
 	case KindCommit:
