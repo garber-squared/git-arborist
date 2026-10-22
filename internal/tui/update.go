@@ -16,6 +16,7 @@ import (
 	"github.com/garber-squared/git-arborist/internal/port"
 	"github.com/garber-squared/git-arborist/internal/pr"
 	"github.com/garber-squared/git-arborist/internal/register"
+	"github.com/garber-squared/git-arborist/internal/selfupdate"
 	"github.com/garber-squared/git-arborist/internal/tmux"
 	"github.com/garber-squared/git-arborist/internal/watcher"
 	"github.com/garber-squared/git-arborist/internal/worktree"
@@ -84,6 +85,25 @@ func paneRefreshCmd() tea.Cmd {
 	})
 }
 
+// selfUpdatedMsg reports the startup self-update of arborist's own checkout.
+type selfUpdatedMsg struct {
+	summary string
+	err     error
+}
+
+// selfUpdateCmd pulls and rebuilds arborist's own checkout off the main update
+// loop (it is network-bound). A binary outside a checkout skips it.
+func selfUpdateCmd() tea.Cmd {
+	dir, ok := selfupdate.SourceDir()
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		summary, err := selfupdate.Run(dir)
+		return selfUpdatedMsg{summary: summary, err: err}
+	}
+}
+
 // Init initializes the model.
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
@@ -91,6 +111,7 @@ func (m *Model) Init() tea.Cmd {
 		agentTickCmd(),
 		paneTickCmd(),
 		flashTickCmd(),
+		selfUpdateCmd(),
 	)
 }
 
@@ -112,6 +133,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case prFetchedMsg:
 		m.applyPR(msg.wt, msg.pr)
+
+	case selfUpdatedMsg:
+		if msg.err != nil {
+			m.message = fmt.Sprintf("self-update failed: %v", msg.err)
+		} else if msg.summary != "" {
+			m.message = msg.summary
+		}
 
 	case agentTickMsg:
 		m.refreshAgents()
