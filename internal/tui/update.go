@@ -31,12 +31,26 @@ type refreshMsg struct{}
 type prFetchedMsg struct {
 	wt worktree.Worktree
 	pr *pr.PullRequest
+	// parent is the issue the branch's issue is a sub-issue of (0 = none);
+	// parentOK is false when that lookup failed and parent means nothing.
+	parent   int
+	parentOK bool
 }
 
-// fetchPRCmd looks up the PR for a worktree off the main update loop.
+// fetchPRCmd looks up the PR for a worktree off the main update loop, along
+// with the parent of the branch's issue, which is what ties a sub-issue's
+// worktree to the worktree of the issue it belongs to.
 func fetchPRCmd(wt worktree.Worktree) tea.Cmd {
 	return func() tea.Msg {
-		return prFetchedMsg{wt: wt, pr: pr.Fetch(wt.Path)}
+		msg := prFetchedMsg{wt: wt, pr: pr.Fetch(wt.Path)}
+		// The strict rule: "release-1.6.0" must not be read as issue #1 and
+		// gain a parent it does not have.
+		if issue := pr.LinkedIssueNumber(wt.Branch); issue != "" {
+			msg.parent, msg.parentOK = pr.ParentIssue(wt.Path, issue)
+		} else {
+			msg.parentOK = true
+		}
+		return msg
 	}
 }
 
@@ -132,7 +146,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshAll()
 
 	case prFetchedMsg:
-		m.applyPR(msg.wt, msg.pr)
+		m.applyPR(msg.wt, msg.pr, msg.parent, msg.parentOK)
 
 	case selfUpdatedMsg:
 		if msg.err != nil {
@@ -336,7 +350,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.sendToPane("Down")
 		case "k":
 			return m, m.sendToPane("Up")
-		case "left", "right", "up", "down", "h", "d", "r", "s", "n", "N", " ", "a", "f":
+		case "left", "right", "up", "down", "h", "d", "r", "s", "n", "N", " ", "a", "f", "m":
 			return m, nil
 		case "q", "ctrl+c":
 			m.expanded = false
@@ -421,6 +435,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.message = fmt.Sprintf("Active only: showing %d of %d worktrees", len(m.rows), len(m.allRows))
 		} else {
 			m.message = "Showing all worktrees"
+		}
+
+	case msg.String() == "m":
+		m.familyView = m.familyView.next()
+		m.applyFilter()
+		if m.familyView == familyAll {
+			m.message = "Showing all worktrees"
+		} else {
+			m.message = fmt.Sprintf("Showing %s: %d of %d worktrees", m.familyView, len(m.rows), len(m.allRows))
 		}
 
 	case msg.String() == "s":
@@ -763,9 +786,13 @@ func (m *Model) refreshAll() tea.Cmd {
 	// Carry over already-known PR data so a refresh doesn't blank the PR
 	// badges until the background lookups return.
 	prevPR := make(map[string]*pr.PullRequest, len(m.allRows))
+	prevParent := make(map[string]int, len(m.allRows))
 	for _, row := range m.allRows {
 		if row.PR != nil {
 			prevPR[row.Worktree.Path] = row.PR
+		}
+		if row.ParentIssue != 0 {
+			prevParent[row.Worktree.Path] = row.ParentIssue
 		}
 	}
 
@@ -787,11 +814,12 @@ func (m *Model) refreshAll() tea.Cmd {
 		go func(i int, wt worktree.Worktree) {
 			defer wg.Done()
 			allRows[i] = Row{
-				Worktree:   wt,
-				GitStatus:  gitstatus.Get(wt.Path),
-				AgentState: agent.ReadState(wt.Path),
-				PR:         prevPR[wt.Path],
-				Port:       ports[wt.RepoRoot].Port(wt.Path),
+				Worktree:    wt,
+				GitStatus:   gitstatus.Get(wt.Path),
+				AgentState:  agent.ReadState(wt.Path),
+				PR:          prevPR[wt.Path],
+				ParentIssue: prevParent[wt.Path],
+				Port:        ports[wt.RepoRoot].Port(wt.Path),
 			}
 		}(i, wt)
 	}
@@ -893,7 +921,7 @@ func (m *Model) refreshAll() tea.Cmd {
 // means the branch is done: its tmux window, containers, and worktree are
 // torn down and the tile removed. A PR closed without merging is left alone —
 // the work usually still lives on the branch.
-func (m *Model) applyPR(wt worktree.Worktree, p *pr.PullRequest) {
+func (m *Model) applyPR(wt worktree.Worktree, p *pr.PullRequest, parent int, parentOK bool) {
 	if p != nil && p.State == "MERGED" {
 		var st *agent.State
 		for i := range m.allRows {
@@ -919,6 +947,9 @@ func (m *Model) applyPR(wt worktree.Worktree, p *pr.PullRequest) {
 	for i := range m.allRows {
 		if m.allRows[i].Worktree.Path == wt.Path {
 			m.allRows[i].PR = p
+			if parentOK {
+				m.allRows[i].ParentIssue = parent
+			}
 			m.applyFilter()
 			return
 		}

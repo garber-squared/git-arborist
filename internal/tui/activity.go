@@ -43,20 +43,20 @@ func (m *Model) recentActivity(row Row, now time.Time) (activity.Event, bool) {
 // does not.
 func (m *Model) applyFilter() {
 	focused := m.focusedPath()
+	m.family = buildFamilies(m.allRows)
 
-	if !m.activeOnly {
-		m.rows = make([]Row, len(m.allRows))
-		copy(m.rows, m.allRows)
-	} else {
-		now := time.Now()
-		rows := make([]Row, 0, len(m.allRows))
-		for _, row := range m.allRows {
-			if m.rowActive(row, now) {
-				rows = append(rows, row)
-			}
+	now := time.Now()
+	rows := make([]Row, 0, len(m.allRows))
+	for _, row := range m.allRows {
+		if !m.familyView.keeps(m.family[row.Worktree.Path].Role) {
+			continue
 		}
-		m.rows = rows
+		if m.activeOnly && !m.rowActive(row, now) {
+			continue
+		}
+		rows = append(rows, row)
 	}
+	m.rows = rows
 
 	m.restoreCursor(focused)
 }

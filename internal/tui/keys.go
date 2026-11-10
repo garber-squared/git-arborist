@@ -28,6 +28,7 @@ func keySections() []keySection {
 			{"l / esc", "collapse expanded tile"},
 			{"s", "scope: all / root / submodules"},
 			{"f", "show active worktrees only"},
+			{"m", "show: all / masters / masters + slaves / slaves"},
 		}},
 		{"Selection", []keyBinding{
 			{"space", "mark / unmark tile"},

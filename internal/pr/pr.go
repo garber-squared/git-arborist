@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -179,4 +180,23 @@ func labelExists(dir, label string) bool {
 		}
 	}
 	return false
+}
+
+// ParentIssue returns the number of the issue that issueNumber is a sub-issue
+// of, or 0 when it has no parent. ok is false when the lookup itself failed
+// (offline, or a gh too old to know the field), so the caller can keep what it
+// knew rather than mistake a failed lookup for "no parent". gh resolves the
+// repo from dir.
+func ParentIssue(dir, issueNumber string) (parent int, ok bool) {
+	cmd := exec.Command("gh", "issue", "view", issueNumber, "--json", "parent", "--jq", ".parent.number // 0")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }

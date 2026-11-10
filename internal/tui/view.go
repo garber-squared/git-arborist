@@ -121,8 +121,14 @@ func (m *Model) renderNormalView() string {
 	var b strings.Builder
 
 	head := "· scope: " + m.scope.String()
+	if m.familyView != familyAll {
+		head += " · " + m.familyView.String()
+	}
 	if m.activeOnly {
-		head += fmt.Sprintf(" · active only (%d of %d)", len(m.rows), len(m.allRows))
+		head += " · active only"
+	}
+	if m.activeOnly || m.familyView != familyAll {
+		head += fmt.Sprintf(" (%d of %d)", len(m.rows), len(m.allRows))
 	}
 	if n := len(m.selected); n > 0 {
 		head += fmt.Sprintf(" · %d selected", n)
@@ -399,6 +405,10 @@ func (m *Model) renderTile(row Row, focused bool, now time.Time) string {
 	case ok:
 		// Tint the border with the submodule's color when not selected.
 		style = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(c)
+	case m.family[row.Worktree.Path].grouped():
+		// A parent issue's worktree and its sub-issues' share a border colour,
+		// so a family reads as a group across the grid.
+		style = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(familyColor(m.family[row.Worktree.Path].Issue))
 	default:
 		style = borderUnselected
 	}
@@ -444,10 +454,18 @@ func (m *Model) renderTileAt(row Row, tileW, tileH int, style lipgloss.Style, ma
 		}
 		infoParts = append(infoParts, style.Render(row.Command))
 	}
+	if badge := m.familyBadge(row, now); badge != "" {
+		infoParts = append(infoParts, badge)
+	}
 	if ev, ok := m.recentActivity(row, now); ok {
-		// The flashing border says something happened; this says what.
+		// The flashing border says something happened; this says what — and,
+		// in a sub-issue's worktree with no session of its own, who did it.
 		label := lipgloss.NewStyle().Foreground(activityColor(ev.Kind)).Bold(true)
-		infoParts = append(infoParts, label.Render("⚡"+ev.Kind.Label()))
+		text := "⚡" + ev.Kind.Label()
+		if parent, driven := m.drivenBy(row, now); driven {
+			text += fmt.Sprintf("←#%d", parent)
+		}
+		infoParts = append(infoParts, label.Render(text))
 	}
 	infoParts = append(infoParts, row.GitStatus.String())
 	if row.PR != nil {
@@ -564,6 +582,11 @@ func (m *Model) renderEmptyState() string {
 
 	// Worktrees exist, they are just all quiet: say so, rather than implying
 	// there is nothing to work on.
+	if m.familyView != familyAll && len(m.allRows) > 0 {
+		b.WriteString(fmt.Sprintf("\n  No %s worktrees to show.\n", m.familyView))
+		b.WriteString("\n  " + styleDim.Render(fmt.Sprintf("%d hidden · press m to change", len(m.allRows))) + "\n")
+		return b.String()
+	}
 	if m.activeOnly && len(m.allRows) > 0 {
 		b.WriteString(fmt.Sprintf("\n  No worktree has been active in the last %s.\n", activity.Linger))
 		b.WriteString("\n  " + styleDim.Render(fmt.Sprintf("%d hidden · press f to show all", len(m.allRows))) + "\n")

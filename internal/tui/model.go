@@ -50,6 +50,10 @@ type Row struct {
 	PaneContent   string // captured pane text
 	Port          int    // dev port assigned to this worktree, 0 if none
 
+	// ParentIssue is the GitHub issue that this branch's issue is a sub-issue
+	// of, 0 when it has none (or is not known yet). See family.go.
+	ParentIssue int
+
 	// Command is the non-agent process running in the worktree's pane, empty
 	// when there is none.
 	Command string
@@ -102,6 +106,11 @@ type Model struct {
 	// activity records when each worktree last changed on disk, driving the
 	// flashing border and the active-only filter.
 	activity *activity.Tracker
+	// family is each worktree's place in the parent-issue/sub-issue tree,
+	// keyed by path and rebuilt whenever the rows change (see family.go).
+	family map[string]familyInfo
+	// familyView limits the grid to master/slave worktrees (m).
+	familyView familyView
 	// activeOnly hides worktrees with nothing running and no recent changes (f).
 	activeOnly bool
 	// flashOn is the current phase of the border flash on active tiles.

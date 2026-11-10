@@ -76,6 +76,7 @@ make dashboard
 | `I` | Open the branch's issue in browser |
 | `g` | Show detailed git status |
 | `f` | Show only worktrees that are active right now |
+| `m` | Cycle view (all / masters / masters + slaves / slaves) — see [Master and slave worktrees](#master-and-slave-worktrees) |
 | `d` | Delete worktree (with confirmation) |
 | `s` | Cycle scope (all / root / submodules) |
 | `r` | Refresh all data |
@@ -129,6 +130,51 @@ five-second timer would reflow the grid every time you paused typing, and a
 worktree you are in the middle of editing would keep dropping out from under the
 cursor. Both windows are one constant each, `Window` and `Linger` in
 `internal/activity`.
+
+## Master and slave worktrees
+
+A common way to split up a big piece of work: open a parent GitHub issue, break
+it into sub-issues, give each one a worktree, and run a single Claude session in
+the parent's worktree that makes the changes in the sub-issues' worktrees.
+arborist calls the parent's worktree the **master** and the sub-issues'
+worktrees its **slaves**, and marks them on the tiles:
+
+| Tile | Badge | Border |
+|---|---|---|
+| master | `◆ 3 subs` | same colour as its slaves |
+| slave | `↳ #2611` (the parent issue) | same colour as its master |
+| slave whose parent issue has no worktree here | `↳ #2611`, dimmed | default |
+| neither | none | default |
+
+Roles come from GitHub, not from watching activity, so they hold while every
+worktree is idle. Alongside each worktree's PR lookup, arborist takes the issue
+number from the branch name (the strict rule: `2613-r1-email` is #2613,
+`release-1.6.0` is nothing) and asks for its parent with
+`gh issue view <n> --json parent`. Issue numbers are only matched within the same
+repository. If the lookup fails, for example offline, a tile keeps the role it
+had.
+
+Who is changing what is inferred. When a slave changes on disk, has no agent of
+its own, and its master's pane has one, the change is credited to the master: the
+slave's activity label reads `⚡file←#2611` (or `⚡commit←#2611` and so on), and
+the master's badge gains `→#2613` while that slave keeps flashing. Something
+other than the master's session editing a slave at the same time would be
+credited to the master too.
+
+A worktree that is a sub-issue of one issue and the parent of others shows as a
+master.
+
+`m` cycles what the grid shows:
+
+| View | Shows |
+|---|---|
+| all | every worktree (default) |
+| masters | masters only |
+| masters + slaves | masters and slaves, hiding worktrees in neither role |
+| slaves | slaves only, including those whose master has no worktree here |
+
+It combines with `f`: masters plus `f` shows the masters doing something right
+now. The header shows the view and how many tiles it hides.
 
 ## Creating worktrees
 
@@ -300,7 +346,7 @@ internal/
   worktree/                    Discover worktrees via `git worktree list`
   agent/                       Read agent state from JSON
   gitstatus/                   Clean/dirty, ahead/behind via git commands
-  pr/                          PR detection via `gh pr view`
+  pr/                          PR detection via `gh pr view`, parent issues via `gh issue view`
   tmux/                        Jump to tmux windows
   watcher/                     fsnotify file watcher for live updates
 ```
@@ -400,9 +446,11 @@ issue number.
 - **Pull requests:** `gh pr view --json number,state,title,isDraft`, `--jq`, `gh pr view --web`
 - **Issue branches:** `gh issue develop 123 --base staging`, `gh issue develop --list 123`
 - **Labels:** `gh label list --search`, `gh label create`, `gh issue edit --add-label`
+- **Sub-issues:** `gh issue view 2613 --json parent`, `gh issue view 2611 --json subIssues`, `--jq '.parent.number // 0'`
 
 - [ ] Set `git config arborist.issueLabel status:in-development`, create a worktree from an issue number, and trace which `gh` calls ran
 - [ ] Explain why a branch named `release-1.6.0` does *not* get the label (see [Issue labels](#issue-labels))
+- [ ] Make an issue with two sub-issues, create a worktree for each, and watch the `◆` and `↳` badges appear; press `m` through each view (see [Master and slave worktrees](#master-and-slave-worktrees))
 
 ### Phase 6: Processes and /proc (weeks 3–4)
 
